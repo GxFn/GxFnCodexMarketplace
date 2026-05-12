@@ -109,7 +109,7 @@ To update the aggregate `GxFn/GxFnCodexMarketplace` listing after this submodule
 npm run sync:gxfn-marketplace
 ```
 
-Use `npm run sync:gxfn-marketplace:push` when the marketplace snapshot should also be committed and pushed. Set `GXFN_CODEX_MARKETPLACE_DIR=/path/to/GxFnCodexMarketplace` if the marketplace repository is not checked out next to the Alembic monorepo or standalone AlembicCodex repository.
+Use `npm run sync:gxfn-marketplace:push` when the marketplace snapshot should also be committed and pushed. Set `GXFN_CODEX_MARKETPLACE_DIR=/path/to/GxFnCodexMarketplace` if the marketplace repository is not checked out next to the Alembic monorepo.
 
 For the full release, testing, and promotion plan, see [RELEASE-PLAYBOOK.md](./RELEASE-PLAYBOOK.md).
 
@@ -122,7 +122,7 @@ Register this repository as a local marketplace during development:
 ```toml
 [marketplaces.alembic-codex]
 source_type = "local"
-source = "/absolute/path/to/AlembicCodex"
+source = "/absolute/path/to/Alembic/plugins/alembic-codex"
 
 [plugins."alembic-codex@alembic-codex"]
 enabled = true
