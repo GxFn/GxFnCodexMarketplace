@@ -13,35 +13,35 @@ English version: [README.md](README.md)
 
 ## 安装
 
-从 GxFn Codex Marketplace 插件目标安装：
+把这个仓库作为 Codex 插件市场安装：
 
 ```bash
-npx codex-marketplace add GxFn/AlembicCodex --plugin
+codex plugin marketplace add GxFn/AlembicCodex --ref main
 ```
 
 如果要固定到对应 Git tag，先创建并推送该 tag，然后使用：
 
 ```bash
-npx codex-marketplace add https://github.com/GxFn/AlembicCodex/tree/v0.1.0 --plugin
+codex plugin marketplace add GxFn/AlembicCodex --ref v0.1.0
 ```
 
 如果 Codex 要求填写 GitHub Target 或直接 artifact path，请填写：
 
 ```text
-https://github.com/GxFn/AlembicCodex/tree/v0.1.0
+GxFn/AlembicCodex
 ```
 
 如果 Codex 弹窗把来源、Git 引用、稀疏路径拆开填写，请这样填：
 
 ```text
 来源：
-https://github.com/GxFn/AlembicCodex.git
+GxFn/AlembicCodex
 
 Git 引用：
-v0.1.0
+main
 
 稀疏路径：
-.
+留空
 ```
 
 安装后在插件列表里启用 `alembic-codex`。
@@ -101,30 +101,26 @@ npm run release:codex-plugin:daemon
 
 这个可选流程还会在临时 localhost 端口启动 daemon，并验证被中断 job 的恢复行为。`prepublishOnly` 会运行 `release:codex-plugin`。
 
-发布可安装插件仓库时，在 release 检查通过后运行：
-
-```bash
-npm run sync:codex-plugin-repo
-```
-
-这会把完整插件目录，包括 `./runtime`，同步到独立的 `GxFn/AlembicCodex` 分发仓库。
+release 检查通过后，如果插件文件有变化，先在这个 submodule 内提交并推送，然后回到 Alembic 主仓库提交更新后的 `plugins/alembic-codex` 指针。
 
 完整发布、测试和推广计划见 [RELEASE-PLAYBOOK.md](./RELEASE-PLAYBOOK.md)。
 
 ## 本地 Marketplace
 
-仓库包含 `.agents/plugins/marketplace.json`，让本地 Codex build 可以在 `gxfn` marketplace 下发现 Alembic 插件，和 `codex-lark-remote` 保持一致。该 entry 指向 `./plugins/alembic-codex`，安装策略为 `AVAILABLE`，认证策略为 `ON_INSTALL`。
+这个分发仓库包含 `.agents/plugins/marketplace.json`，让 Codex 可以把该仓库本身添加为插件市场。marketplace 名称是 `alembic-codex`，唯一 entry 指向 `.`，安装策略为 `AVAILABLE`，认证策略为 `ON_INSTALL`。
 
 开发时把这个仓库注册为 local marketplace：
 
 ```toml
-[marketplaces.gxfn]
+[marketplaces.alembic-codex]
 source_type = "local"
-source = "/absolute/path/to/Alembic"
+source = "/absolute/path/to/AlembicCodex"
 
-[plugins."alembic-codex@gxfn"]
+[plugins."alembic-codex@alembic-codex"]
 enabled = true
 ```
+
+Alembic 主仓库仍保留自己的本地开发 marketplace：`.agents/plugins/marketplace.json`，名称是 `gxfn`，指向 `./plugins/alembic-codex`。
 
 `npm run smoke:codex-plugin` 会打包 runtime，从 tarball 里解析 marketplace entry，把插件复制到临时安装目录，并验证已安装 manifest、内置 `./runtime` package、MCP 配置、assets、skills 和 stdio MCP 调用。
 

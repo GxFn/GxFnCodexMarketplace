@@ -7,7 +7,7 @@ This playbook describes how to release, test, and promote the Alembic Codex plug
 Alembic for Codex is built from the Alembic monorepo and published through a dedicated plugin distribution repo:
 
 - The npm runtime package: `alembic-ai`.
-- The Codex plugin source directory: `plugins/alembic-codex`.
+- The Codex plugin submodule: `plugins/alembic-codex` -> `GxFn/AlembicCodex`.
 - The embedded Codex runtime package generated at `plugins/alembic-codex/runtime`.
 - The installable plugin repository: `GxFn/AlembicCodex`.
 - The repo-local Codex marketplace entry: `.agents/plugins/marketplace.json`.
@@ -35,7 +35,7 @@ That means every package version bump must keep these surfaces aligned:
 - `plugins/alembic-codex/runtime/package.json`
 - `plugins/alembic-codex/README.md`
 - `plugins/alembic-codex/README.zh-CN.md`
-- the synced `GxFn/AlembicCodex` repository
+- the `GxFn/AlembicCodex` submodule commit
 - root `README.md` / `README_CN.md` when public instructions change
 
 ## Version And Tag Flow
@@ -52,21 +52,21 @@ npm run build:dashboard
 npm run prepare:codex-plugin-runtime
 alembic codex diagnostics --json
 npm run release:codex-plugin
-npm run sync:codex-plugin-repo
 npm run release:codex-plugin:daemon
 ```
 
-4. Commit the version and release-readiness changes.
-5. Push `main` and wait for CI to pass.
-6. Create an annotated tag on the exact green commit:
+4. Commit and push any plugin changes from inside `plugins/alembic-codex`.
+5. Commit the updated submodule pointer and release-readiness changes in the Alembic monorepo.
+6. Push `main` and wait for CI to pass.
+7. Create an annotated tag on the exact green commit:
 
 ```bash
 git tag -a v0.1.0 -m "Release v0.1.0"
 git push origin v0.1.0
 ```
 
-7. Watch the `Release` workflow. It verifies the tag matches `package.json`, builds runtime/Dashboard/VS Code extension, runs lint, unit and integration tests, previews the npm package, uploads the VS Code artifact, and publishes npm with provenance.
-8. Confirm the registry:
+8. Watch the `Release` workflow. It verifies the tag matches `package.json`, builds runtime/Dashboard/VS Code extension, runs lint, unit and integration tests, previews the npm package, uploads the VS Code artifact, and publishes npm with provenance.
+9. Confirm the registry:
 
 ```bash
 npm view alembic-ai version dist-tags.latest
@@ -111,7 +111,7 @@ Use the matrix below when changing plugin metadata, MCP startup, daemon lifecycl
 | CLI diagnostics | `alembic codex diagnostics --json` | Node, npm/npx, embedded runtime wiring, plugin files, admin gate, daemon version checks work outside Codex | Every release candidate |
 | Package/install smoke | `npm run smoke:codex-plugin -- --no-stdio` | npm tarball contents and local marketplace install simulation | Docs/metadata/package files changes |
 | MCP stdio smoke | `npm run smoke:codex-plugin` | Real MCP client can list/call Codex tools through stdio | MCP shim changes |
-| Plugin repo sync | `npm run sync:codex-plugin-repo` | Dedicated `GxFn/AlembicCodex` repo receives the complete installable plugin with embedded runtime | Every release candidate |
+| Plugin submodule commit | `git -C plugins/alembic-codex status` | Dedicated `GxFn/AlembicCodex` repo contains the complete installable plugin with embedded runtime | Every release candidate |
 | Daemon smoke | `npm run release:codex-plugin:daemon` | Dashboard daemon startup, daemon state, job recovery | Daemon/job/Dashboard bridge changes |
 | Unit tests | `npm run test:unit` | Core behavior and Codex MCP unit contracts | Shared code changes |
 | Integration tests | `npm run test:integration` | End-to-end service behavior without relying on the Codex app | HTTP/workflow/storage changes |
