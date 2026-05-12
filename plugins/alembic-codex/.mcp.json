@@ -2,7 +2,7 @@
   "mcpServers": {
     "alembic": {
       "command": "npx",
-      "args": ["-y", "--prefix", "/tmp", "--package", "./runtime", "alembic-codex-mcp"],
+      "args": ["-y", "--package", "./runtime.tgz", "alembic-codex-mcp"],
       "cwd": ".",
       "env": {
         "ALEMBIC_CHANNEL_ID": "codex",

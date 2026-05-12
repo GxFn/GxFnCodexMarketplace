@@ -49,9 +49,9 @@ Alembic also ships a Codex plugin at `plugins/alembic-codex`. It is designed for
 The Codex plugin lives at `plugins/alembic-codex` as a Git submodule backed by
 the dedicated `GxFn/AlembicCodex` distribution repository.
 The installed plugin ships Alembic business runtime code in `./runtime` as an
-embedded `alembic-ai` package; `npx --package ./runtime` is used only to install
-that local package and resolve production npm dependencies before starting
-`alembic-codex-mcp`.
+embedded `alembic-ai` package, plus `./runtime.tgz` packed from that directory;
+`npx --package ./runtime.tgz` is used only to install that local package tarball
+and resolve production npm dependencies before starting `alembic-codex-mcp`.
 
 Recommended first run inside Codex:
 
@@ -70,11 +70,15 @@ alembic codex diagnostics --json
 npm run verify:codex-channel
 npm run release:codex-channel
 npm run release:codex-plugin
+npm run sync:gxfn-marketplace
 npm run release:codex-plugin:daemon   # optional localhost daemon smoke
 ```
 
-When plugin contents change, commit and push inside `plugins/alembic-codex`
-first, then commit the updated submodule pointer in this repository.
+When plugin contents change, publish the AlembicCodex distribution repository
+first, then run `npm run sync:gxfn-marketplace` to refresh the aggregate
+`GxFn/GxFnCodexMarketplace` plugin snapshot. Use
+`npm run sync:gxfn-marketplace:push` when that marketplace snapshot should be
+committed and pushed in the same step.
 
 For the Codex channel manifest, see `channels/codex/channel.json`. For the detailed release, testing, and promotion plan, see `plugins/alembic-codex/RELEASE-PLAYBOOK.md`.
 

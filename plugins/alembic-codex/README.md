@@ -50,11 +50,11 @@ Enable `alembic-codex` from the plugin list after installation.
 
 - Node.js 22 or newer is required. Node 22 LTS is recommended for local development; keep the MCP shim and daemon on the same Node executable.
 - The plugin ships Alembic business runtime code in `./runtime`; that embedded package is `alembic-ai@0.1.0`.
-- The marketplace MCP config runs `npx --package ./runtime alembic-codex-mcp`, so `npx` installs the plugin-local runtime package and resolves its production npm dependencies instead of downloading Alembic code from the registry.
+- The marketplace MCP config runs `npx --package ./runtime.tgz alembic-codex-mcp`, so `npx` installs the plugin-local runtime tarball and resolves its production npm dependencies instead of downloading Alembic code from the registry.
 - The marketplace MCP config sets `ALEMBIC_CHANNEL_ID=codex`; project feature checks should use that stable channel id.
 - The marketplace MCP config explicitly sets `ALEMBIC_MCP_MODE=1` and `ALEMBIC_CODEX_MCP_MODE=1`; the binary still applies the same defaults as a safety net.
-- The MCP launch command runs `npx` with `--prefix /tmp` so dependency installation does not write into the installed plugin directory.
-- The MCP environment sets `npm_config_cache=/tmp/alembic-codex-npm-cache` so a broken or root-owned user npm cache cannot block plugin startup.
+- The MCP launch command does not use `--prefix`; that keeps `./runtime.tgz` relative to the installed plugin root.
+- The MCP environment sets `npm_config_cache=/tmp/alembic-codex-npm-cache` so dependency installation does not write into the installed plugin directory and a broken or root-owned user npm cache cannot block plugin startup.
 - The default MCP tier is `agent`; admin tools stay hidden unless both `ALEMBIC_MCP_TIER=admin` and `ALEMBIC_CODEX_ENABLE_ADMIN=1` are set.
 
 ## First Checks
@@ -130,11 +130,11 @@ enabled = true
 
 The Alembic monorepo still keeps its local development marketplace at `.agents/plugins/marketplace.json`, named `gxfn`, pointing to `./plugins/alembic-codex`.
 
-`npm run smoke:codex-plugin` packages the runtime, resolves this marketplace entry from the packed tarball, copies the plugin into a temporary install root, validates the installed manifest, embedded `./runtime` package, MCP config, assets, skills, and stdio MCP calls.
+`npm run smoke:codex-plugin` packages the runtime, resolves this marketplace entry from the packed tarball, copies the plugin into a temporary install root, validates the installed manifest, embedded `./runtime` package, `./runtime.tgz` npx entry, MCP config, assets, skills, and stdio MCP calls.
 
 ## Offline Fallback
 
-The default plugin config launches the embedded `./runtime` package through `npx`. If the first run cannot reach the npm registry to resolve production dependencies, install the same runtime version globally and run the MCP binary from `PATH`:
+The default plugin config launches the embedded `./runtime.tgz` package through `npx`. If the first run cannot reach the npm registry to resolve production dependencies, install the same runtime version globally and run the MCP binary from `PATH`:
 
 ```bash
 npm install -g alembic-ai@0.1.0

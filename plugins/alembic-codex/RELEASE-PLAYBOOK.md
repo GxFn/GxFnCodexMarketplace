@@ -9,6 +9,7 @@ Alembic for Codex is built from the Alembic monorepo and published through a ded
 - The npm runtime package: `alembic-ai`.
 - The Codex plugin submodule: `plugins/alembic-codex` -> `GxFn/AlembicCodex`.
 - The embedded Codex runtime package generated at `plugins/alembic-codex/runtime`.
+- The embedded runtime tarball generated at `plugins/alembic-codex/runtime.tgz`.
 - The installable plugin repository: `GxFn/AlembicCodex`.
 - The repo-local Codex marketplace entry: `.agents/plugins/marketplace.json`.
 
@@ -18,14 +19,15 @@ resolve that package's production npm dependencies:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "--prefix", "/tmp", "--package", "./runtime", "alembic-codex-mcp"],
+  "args": ["-y", "--package", "./runtime.tgz", "alembic-codex-mcp"],
   "cwd": "."
 }
 ```
 
-`./runtime/package.json` is still `alembic-ai@<version>`. The difference is that
-Alembic business code ships inside the installed plugin; `npx` no longer
-downloads the Alembic package body before starting MCP.
+`./runtime/package.json` is still `alembic-ai@<version>`, and
+`./runtime.tgz` is packed from that exact directory. The tarball is what makes
+`npx` install production dependencies with normal npm package semantics while
+keeping Alembic business code inside the installed plugin.
 
 That means every package version bump must keep these surfaces aligned:
 
@@ -143,7 +145,7 @@ Run this against a fresh test repository and one real project before public prom
 | Symptom | First Check | Likely Cause | Fix |
 | --- | --- | --- | --- |
 | Plugin visible but MCP does not start | `alembic codex diagnostics --json` | Node < 22, missing npm/npx, npx cannot resolve embedded runtime dependencies | Install Node 22, use global `npm install -g alembic-ai@<version>` fallback |
-| Diagnostics runtime mismatch | `plugins/alembic-codex/.mcp.json` and `plugins/alembic-codex/runtime/package.json` | Plugin config no longer points at `./runtime`, or runtime was not regenerated | Run `npm run prepare:codex-plugin-runtime` and rerun `npm run verify:codex-plugin` |
+| Diagnostics runtime mismatch | `plugins/alembic-codex/.mcp.json`, `plugins/alembic-codex/runtime/package.json`, and `plugins/alembic-codex/runtime.tgz` | Plugin config no longer points at `./runtime.tgz`, or runtime was not regenerated | Run `npm run prepare:codex-plugin-runtime` and rerun `npm run verify:codex-plugin` |
 | npm release did not happen | Release workflow logs | Tag mismatch, tests failed, npm token/provenance issue | Fix workflow failure, create a new patch version/tag |
 | Daemon starts but tools fail | `alembic daemon status --json` and daemon log path | stale daemon state, missing bridge token, health identity mismatch | Stop daemon, rerun dashboard/bootstrap, inspect `daemon.log` |
 | Job remains running forever | `alembic_codex_job` and Dashboard jobs page | daemon restart before interruption marking, old JobStore record | Restart daemon; lifecycle should mark active jobs failed with interruption reason |
@@ -240,7 +242,7 @@ Maintain a submission pack:
 - Known limitations and support URL.
 - `npm view alembic-ai version dist-tags.latest` output.
 
-If a formal marketplace review path is required, submit only after the manual Codex app pass is green on the exact embedded `./runtime` package generated for the release version.
+If a formal marketplace review path is required, submit only after the manual Codex app pass is green on the exact embedded `./runtime.tgz` package generated for the release version.
 
 ## Metrics To Watch
 
@@ -292,6 +294,6 @@ Quality:
 
 ### Known limitations
 - Requires Node.js 22+.
-- First run through `npx --package ./runtime` may need npm registry access for production dependencies.
+- First run through `npx --package ./runtime.tgz` may need npm registry access for production dependencies.
 - Admin tools are disabled by default.
 ```

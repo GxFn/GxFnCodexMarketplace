@@ -50,11 +50,11 @@ main
 
 - 需要 Node.js 22 或更新版本。本地开发推荐 Node 22 LTS；MCP shim 和 daemon 应使用同一个 Node 可执行文件。
 - 插件内置 Alembic 业务运行时代码在 `./runtime`；这个内置 package 是 `alembic-ai@0.1.0`。
-- Marketplace MCP 配置运行 `npx --package ./runtime alembic-codex-mcp`，所以 `npx` 安装的是插件本地 runtime package，并解析它的生产 npm 依赖，而不是从 registry 下载 Alembic 业务代码。
+- Marketplace MCP 配置运行 `npx --package ./runtime.tgz alembic-codex-mcp`，所以 `npx` 安装的是插件本地 runtime tarball，并解析它的生产 npm 依赖，而不是从 registry 下载 Alembic 业务代码。
 - Marketplace MCP 配置会设置 `ALEMBIC_CHANNEL_ID=codex`；项目功能判断应使用这个稳定渠道标识。
 - Marketplace MCP 配置会显式设置 `ALEMBIC_MCP_MODE=1` 和 `ALEMBIC_CODEX_MCP_MODE=1`；binary 入口仍会做同样兜底。
-- MCP 启动命令通过 `npx --prefix /tmp` 运行，避免依赖安装写入已安装插件目录。
-- MCP 环境会设置 `npm_config_cache=/tmp/alembic-codex-npm-cache`，避免用户目录下损坏或 root-owned 的 npm cache 阻塞插件启动。
+- MCP 启动命令不使用 `--prefix`，这样 `./runtime.tgz` 会相对于已安装插件根目录解析。
+- MCP 环境会设置 `npm_config_cache=/tmp/alembic-codex-npm-cache`，避免依赖安装写入已安装插件目录，也避免用户目录下损坏或 root-owned 的 npm cache 阻塞插件启动。
 - 默认 MCP tier 是 `agent`；只有同时设置 `ALEMBIC_MCP_TIER=admin` 和 `ALEMBIC_CODEX_ENABLE_ADMIN=1` 时，才会显示 admin tools。
 
 ## 首次检查
@@ -130,11 +130,11 @@ enabled = true
 
 Alembic 主仓库仍保留自己的本地开发 marketplace：`.agents/plugins/marketplace.json`，名称是 `gxfn`，指向 `./plugins/alembic-codex`。
 
-`npm run smoke:codex-plugin` 会打包 runtime，从 tarball 里解析 marketplace entry，把插件复制到临时安装目录，并验证已安装 manifest、内置 `./runtime` package、MCP 配置、assets、skills 和 stdio MCP 调用。
+`npm run smoke:codex-plugin` 会打包 runtime，从 tarball 里解析 marketplace entry，把插件复制到临时安装目录，并验证已安装 manifest、内置 `./runtime` package、`./runtime.tgz` npx entry、MCP 配置、assets、skills 和 stdio MCP 调用。
 
 ## 离线 Fallback
 
-默认插件配置通过 `npx` 启动内置 `./runtime` package。如果首次运行无法访问 npm registry 解析生产依赖，可以全局安装同一 runtime 版本，然后从 `PATH` 运行 MCP binary：
+默认插件配置通过 `npx` 启动内置 `./runtime.tgz` package。如果首次运行无法访问 npm registry 解析生产依赖，可以全局安装同一 runtime 版本，然后从 `PATH` 运行 MCP binary：
 
 ```bash
 npm install -g alembic-ai@0.1.0
