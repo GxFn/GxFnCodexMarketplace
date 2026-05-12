@@ -109,6 +109,14 @@ npm run sync:codex-plugin-repo
 
 这会把完整插件目录，包括 `./runtime`，同步到独立的 `GxFn/AlembicCodex` 分发仓库。
 
+分发仓库刷新后，把可安装插件快照同步到聚合 `GxFn/GxFnCodexMarketplace` 仓库：
+
+```bash
+npm run sync:gxfn-marketplace
+```
+
+如果要让脚本同时在市场仓库里提交并推送，运行 `npm run sync:gxfn-marketplace:push`。如果 `GxFnCodexMarketplace` 没有和本仓库放在同一层目录，用 `GXFN_CODEX_MARKETPLACE_DIR=/path/to/GxFnCodexMarketplace` 指定路径。
+
 完整发布、测试和推广计划见 [RELEASE-PLAYBOOK.md](./RELEASE-PLAYBOOK.md)。
 
 ## 本地 Marketplace

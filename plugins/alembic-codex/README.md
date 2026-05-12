@@ -109,6 +109,14 @@ npm run sync:codex-plugin-repo
 
 This syncs the complete plugin directory, including `./runtime`, to the dedicated `GxFn/AlembicCodex` distribution repository.
 
+After the distribution repository has been refreshed, sync the installable plugin snapshot into the aggregate `GxFn/GxFnCodexMarketplace` repository:
+
+```bash
+npm run sync:gxfn-marketplace
+```
+
+Use `npm run sync:gxfn-marketplace:push` when the marketplace update should also be committed and pushed. Set `GXFN_CODEX_MARKETPLACE_DIR=/path/to/GxFnCodexMarketplace` if the marketplace repository is not checked out next to this repository.
+
 For the full release, testing, and promotion plan, see [RELEASE-PLAYBOOK.md](./RELEASE-PLAYBOOK.md).
 
 ## Local Marketplace

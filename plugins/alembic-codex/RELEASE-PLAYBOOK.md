@@ -53,6 +53,7 @@ npm run prepare:codex-plugin-runtime
 alembic codex diagnostics --json
 npm run release:codex-plugin
 npm run sync:codex-plugin-repo
+npm run sync:gxfn-marketplace --prefix ../AlembicCodex
 npm run release:codex-plugin:daemon
 ```
 
@@ -112,6 +113,7 @@ Use the matrix below when changing plugin metadata, MCP startup, daemon lifecycl
 | Package/install smoke | `npm run smoke:codex-plugin -- --no-stdio` | npm tarball contents and local marketplace install simulation | Docs/metadata/package files changes |
 | MCP stdio smoke | `npm run smoke:codex-plugin` | Real MCP client can list/call Codex tools through stdio | MCP shim changes |
 | Plugin repo sync | `npm run sync:codex-plugin-repo` | Dedicated `GxFn/AlembicCodex` repo receives the complete installable plugin with embedded runtime | Every release candidate |
+| GxFn marketplace sync | `npm run sync:gxfn-marketplace --prefix ../AlembicCodex` | Aggregate `GxFn/GxFnCodexMarketplace` receives the installable Alembic plugin snapshot | Every release candidate |
 | Daemon smoke | `npm run release:codex-plugin:daemon` | Dashboard daemon startup, daemon state, job recovery | Daemon/job/Dashboard bridge changes |
 | Unit tests | `npm run test:unit` | Core behavior and Codex MCP unit contracts | Shared code changes |
 | Integration tests | `npm run test:integration` | End-to-end service behavior without relying on the Codex app | HTTP/workflow/storage changes |
