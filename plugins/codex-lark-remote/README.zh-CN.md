@@ -1,4 +1,4 @@
-# Codex Lark Remote
+# Lark Remote
 
 从飞书/Lark 继续当前 Codex 对话。
 
@@ -10,7 +10,7 @@ Marketplace 页面：[codex-lark-remote](https://www.codex-marketplace.com/plugi
 
 ## 默认流程
 
-Codex Lark Remote 只围绕一个默认流程设计：从当前 Codex 对话启动，明确同意接管，
+Lark Remote 只围绕一个默认流程设计：从当前 Codex 对话启动，明确同意接管，
 然后从飞书/Lark 继续同一个对话。
 
 飞书/Lark 消息会作为普通用户消息交给 Codex。机器人会把最终回答和执行过程中的关键
@@ -151,7 +151,7 @@ Codex 必须先请求你的明确同意，才会启动接管。确认后，插�
 
 ## 权限边界
 
-Codex Lark Remote 接管的是对话输入输出链路，不是 Codex Desktop 的原生 UI。
+Lark Remote 接管的是对话输入输出链路，不是 Codex Desktop 的原生 UI。
 飞书/Lark 不能点击权限弹窗、MCP 审批、沙箱提权、联网/安装依赖审批，或其他
 Codex 原生 UI 弹窗。
 

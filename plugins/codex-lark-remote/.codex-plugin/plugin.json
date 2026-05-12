@@ -3,7 +3,7 @@
   "version": "0.1.24",
   "description": "Remote Codex programming from Feishu/Lark chat.",
   "author": {
-    "name": "Codex Lark Remote Contributors"
+    "name": "Lark Remote Contributors"
   },
   "license": "MIT",
   "keywords": [
@@ -16,10 +16,10 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Codex Lark Remote",
+    "displayName": "Lark Remote",
     "shortDescription": "Continue Codex from Feishu/Lark chat.",
-    "longDescription": "Codex Lark Remote lets you continue the current Codex conversation from Feishu/Lark. Start it in an open Codex chat, then send normal messages to the Feishu/Lark bot to keep working in the same conversation.",
-    "developerName": "Codex Lark Remote Contributors",
+    "longDescription": "Lark Remote lets you continue the current Codex conversation from Feishu/Lark. Start it in an open Codex chat, then send normal messages to the Feishu/Lark bot to keep working in the same conversation.",
+    "developerName": "Lark Remote Contributors",
     "category": "Productivity",
     "capabilities": [
       "Read",
@@ -27,9 +27,9 @@
       "Interactive"
     ],
     "defaultPrompt": [
-      "Start Codex Lark Remote for this conversation",
-      "Configure Codex Lark Remote with my Feishu/Lark app credentials",
-      "Show Codex Lark Remote setup status"
+      "Start Lark Remote for this conversation",
+      "Configure Lark Remote with my Feishu/Lark app credentials",
+      "Show Lark Remote setup status"
     ],
     "brandColor": "#00B96B",
     "composerIcon": "./assets/icon.svg",

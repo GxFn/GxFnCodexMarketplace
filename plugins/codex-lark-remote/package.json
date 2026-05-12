@@ -1,7 +1,7 @@
 {
   "name": "codex-lark-remote",
   "version": "0.1.24",
-  "description": "Remote Codex programming from Feishu/Lark chat.",
+  "description": "Continue Codex from Feishu/Lark chat.",
   "type": "module",
   "bin": {
     "codex-lark-remote": "./bin/codex-lark-bridge.mjs",
@@ -19,7 +19,7 @@
     "remote"
   ],
   "author": {
-    "name": "Codex Lark Remote Contributors"
+    "name": "Lark Remote Contributors"
   },
   "license": "MIT",
   "dependencies": {

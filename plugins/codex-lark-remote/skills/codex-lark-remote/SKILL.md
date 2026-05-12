@@ -1,9 +1,9 @@
 ---
 name: codex-lark-remote
-description: Use when the user asks to start, configure, diagnose, or use Codex Lark Remote, or when Codex is responding to a Feishu/Lark message through codex-lark-remote. Defaults to continuing the current Codex conversation from Feishu/Lark.
+description: Use when the user asks to start, configure, diagnose, or use Lark Remote, or when Codex is responding to a Feishu/Lark message through codex-lark-remote. Defaults to continuing the current Codex conversation from Feishu/Lark.
 ---
 
-# Codex Lark Remote
+# Lark Remote
 
 Use this skill when the user asks to start this plugin, configure Feishu/Lark,
 or continue Codex from Feishu/Lark.
@@ -25,7 +25,7 @@ When the user says "start this plugin" or similar:
    script fallback unless the user explicitly asks for plugin development
    debugging.
 3. Before calling `codex_lark_handoff`, clearly tell the user that handoff stores
-   local routing state for this Codex thread in the local Codex Lark Remote
+   local routing state for this Codex thread in the local Lark Remote
    bridge. Existing chat history is not sent to Feishu/Lark; future Feishu/Lark
    messages and Codex replies may pass through the configured bot while handoff
    is active. Ask for explicit consent in the current chat. Do not call

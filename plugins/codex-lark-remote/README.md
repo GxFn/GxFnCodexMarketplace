@@ -1,4 +1,4 @@
-# Codex Lark Remote
+# Lark Remote
 
 Continue the current Codex conversation from Feishu/Lark.
 
@@ -11,7 +11,7 @@ homepage also has a full first-time user guide.
 
 ## Default flow
 
-Codex Lark Remote is designed around one default flow: start from an active
+Lark Remote is designed around one default flow: start from an active
 Codex conversation, approve handoff, then continue that same conversation from
 Feishu/Lark.
 
@@ -164,7 +164,7 @@ Remote replies are optimized for coding on a phone or in chat:
 
 ## Permission boundaries
 
-Codex Lark Remote takes over the conversation stream, not the native Codex
+Lark Remote takes over the conversation stream, not the native Codex
 Desktop UI. Feishu/Lark cannot click permission dialogs, MCP approvals,
 sandbox-escalation prompts, network/install approvals, or other native Codex UI
 popups.
