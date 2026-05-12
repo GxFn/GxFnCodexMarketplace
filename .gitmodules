@@ -1,0 +1,6 @@
+[submodule "plugins/alembic-codex"]
+	path = plugins/alembic-codex
+	url = https://github.com/GxFn/AlembicCodex.git
+[submodule "plugins/codex-lark-remote"]
+	path = plugins/codex-lark-remote
+	url = https://github.com/GxFn/codex-lark-remote.git
