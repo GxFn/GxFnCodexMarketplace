@@ -25,12 +25,11 @@ Git 引用：main
 
 ## 开发
 
-插件仓库通过 Git submodule 管理：
+插件目录是 vendored release snapshot：
 
 ```bash
-git submodule update --init --recursive
+plugins/alembic-codex
+plugins/codex-lark-remote
 ```
 
-某个插件仓库发布新版本后，在这里更新对应 submodule 指针，验证 Codex 市场展示，再提交这个指针更新。
-
-注意：`codex-lark-remote` 仓库本身是 workspace，真正的 Codex 插件根目录是 `plugins/codex-lark-remote/plugins/codex-lark-remote`。
+Codex 从 Git 添加 marketplace 时不会初始化 Git submodule，所以这个仓库刻意内置可安装插件根目录，而不是使用 submodule。某个插件仓库发布新版本后，刷新这里对应的插件目录，验证 Codex 市场展示，再提交 snapshot 更新。

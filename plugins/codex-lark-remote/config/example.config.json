@@ -1,0 +1,41 @@
+{
+  "lark": {
+    "appId": "cli_xxx",
+    "appSecret": "xxx",
+    "verificationToken": "",
+    "encryptKey": "",
+    "allowedUsers": [],
+    "transport": "websocket",
+    "websocket": true,
+    "websocketStartTimeoutMs": 10000
+  },
+  "defaultRepo": "example",
+  "repos": {
+    "example": {
+      "path": "/absolute/path/to/your/repo",
+      "remote": "origin",
+      "baseBranch": "main",
+      "testCommand": "npm test"
+    }
+  },
+  "runner": {
+    "sandbox": "workspace-write",
+    "askForApproval": "never",
+    "ignoreUserConfig": true,
+    "model": ""
+  },
+  "handoff": {
+    "enabled": true,
+    "mode": "resume",
+    "promptStyle": "direct",
+    "notifyQueued": false,
+    "notifyStarted": false
+  },
+  "policy": {
+    "requireReviewForCommit": true,
+    "requireReviewForPush": true,
+    "maxPromptChars": 4000,
+    "maxResultChars": 3000,
+    "allowNetwork": false
+  }
+}

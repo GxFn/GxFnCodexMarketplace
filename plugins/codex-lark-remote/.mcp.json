@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "codex-lark-remote": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "--package",
+        "@larksuiteoapi/node-sdk@1.63.1",
+        "node",
+        "./bin/codex-lark-remote-mcp.mjs"
+      ],
+      "cwd": "."
+    }
+  }
+}

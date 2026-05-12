@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Codex Lark Remote icon">
+  <rect width="1024" height="1024" rx="228" fill="#071512"/>
+  <path
+    fill="#00B96B"
+    d="M512 164c197.6 0 358 132.8 358 296.8S709.6 757.6 512 757.6c-39.8 0-78.1-5.4-113.9-15.4L254 842l45.7-141.6C211.5 646 154 559.4 154 460.8 154 296.8 314.4 164 512 164Z"
+  />
+  <rect x="264" y="310" width="496" height="300" rx="64" fill="#09231F"/>
+  <path
+    fill="none"
+    stroke="#FFFFFF"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="58"
+    d="m379 402 82 58-82 58"
+  />
+  <path
+    fill="none"
+    stroke="#B8F7DE"
+    stroke-linecap="round"
+    stroke-width="58"
+    d="M518 520h136"
+  />
+  <path
+    fill="none"
+    stroke="#7AF4C3"
+    stroke-linecap="round"
+    stroke-width="38"
+    d="M666 236c58 30 96 73 115 129"
+  />
+</svg>

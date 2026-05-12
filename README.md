@@ -25,12 +25,11 @@ Sparse path: leave empty
 
 ## Development
 
-The plugin repositories are tracked as Git submodules:
+The plugin directories are vendored release snapshots:
 
 ```bash
-git submodule update --init --recursive
+plugins/alembic-codex
+plugins/codex-lark-remote
 ```
 
-When a plugin repository is released, update the corresponding submodule pointer, verify the marketplace in Codex, then commit the pointer change here.
-
-Note: `codex-lark-remote` is a workspace repository, so its Codex plugin root is `plugins/codex-lark-remote/plugins/codex-lark-remote`.
+Codex does not initialize Git submodules when adding a marketplace from Git, so this repository intentionally vendors the installable plugin roots instead of tracking them as submodules. When a plugin repository is released, refresh the corresponding directory, verify the marketplace in Codex, then commit the snapshot update here.

@@ -1,0 +1,291 @@
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { asString, CODEX_REQUIRED_SKILLS, loadCodexPluginRegistry } from './PluginRegistry.js';
+import { CODEX_ADMIN_ENABLE_ENV, CODEX_DEFAULT_MCP_TIER, CODEX_MCP_MODE_ENV, CODEX_MCP_SHIM_ENV, CODEX_PLUGIN_NAME, resolveCodexRuntimeContext, } from './RuntimeContext.js';
+export function buildCodexRuntimeDiagnostics(daemonStatus, context = resolveCodexRuntimeContext()) {
+    const nodeMajor = Number.parseInt(process.versions.node.split('.')[0] || '0', 10);
+    const npm = probeCommand('npm');
+    const npx = probeCommand('npx');
+    const npmAvailable = npm.available === true;
+    const npxAvailable = npx.available === true;
+    const plugin = buildCodexPluginDiagnostics(context);
+    const checks = {
+        adminGate: context.requestedTier !== 'admin' || context.adminEnabled,
+        node: nodeMajor >= 22,
+        npm: npmAvailable,
+        npx: npxAvailable,
+        embeddedRuntime: plugin.mcp.embeddedRuntime,
+        packagePin: plugin.mcp.packagePin,
+        pluginAssets: plugin.assets.ok,
+        pluginManifest: plugin.manifest.ok,
+        pluginMcp: plugin.mcp.ok,
+        pluginSkills: plugin.skills.ok,
+    };
+    const issues = buildDiagnosticIssues({
+        adminEnabled: context.adminEnabled,
+        checks,
+        npm,
+        npx,
+        packageVersion: context.packageVersion,
+        plugin,
+        requestedTier: context.requestedTier,
+    });
+    return {
+        ok: Object.values(checks).every(Boolean),
+        summary: buildDiagnosticSummary(issues),
+        checks,
+        issues,
+        nextActions: buildDiagnosticNextActions(issues),
+        primaryAction: issues.length === 0
+            ? buildRecommendedAction({
+                label: 'Check workspace status',
+                reason: 'Runtime checks passed; inspect project initialization and daemon state next.',
+                startsDaemon: false,
+                tool: 'alembic_codex_status',
+            })
+            : buildRecommendedAction({
+                label: 'Fix diagnostics',
+                reason: 'Resolve the reported runtime or plugin metadata issue before using Alembic.',
+                startsDaemon: false,
+                tool: 'alembic_codex_diagnostics',
+            }),
+        node: {
+            ok: checks.node,
+            required: '>=22',
+            recommended: '22 LTS',
+            version: process.versions.node,
+            execPath: process.execPath,
+            modules: process.versions.modules,
+        },
+        commands: {
+            npm,
+            npx,
+        },
+        package: {
+            name: context.runtimePackage,
+            version: context.packageVersion,
+            embeddedRuntime: plugin.mcp.embeddedRuntime,
+            runtimeSpecifier: context.embeddedRuntimeSpecifier,
+            pinnedSpecifier: context.pinnedRuntimeSpecifier,
+            mcpBinary: context.runtimeBin,
+        },
+        plugin,
+        daemon: {
+            ready: daemonStatus.ready,
+            status: daemonStatus.status,
+            stateVersion: daemonStatus.state?.version || null,
+            healthVersion: readHealthVersion(daemonStatus.health),
+        },
+        codex: {
+            channelId: context.channelId,
+            expectedChannelId: context.expectedChannelId,
+            requestedTier: context.requestedTier,
+            effectiveTier: context.effectiveTier,
+            adminEnabled: context.adminEnabled,
+            adminMode: context.adminEnabled
+                ? `enabled-by-${CODEX_ADMIN_ENABLE_ENV}`
+                : `disabled-requires-${CODEX_ADMIN_ENABLE_ENV}=1`,
+        },
+        offlineFallback: {
+            note: 'The Codex plugin ships Alembic runtime code in ./runtime. npx installs that local package and resolves its production npm dependencies on first MCP start.',
+            globalInstall: `npm install -g ${context.pinnedRuntimeSpecifier}`,
+            localPackage: context.embeddedRuntimeSpecifier,
+            command: context.runtimeBin,
+        },
+        cleanup: {
+            automaticOnUninstall: false,
+            command: 'alembic_codex_cleanup',
+            defaultMode: 'dry-run',
+        },
+    };
+}
+export function buildCodexPluginDiagnostics(context = resolveCodexRuntimeContext()) {
+    const registry = loadCodexPluginRegistry(context);
+    const args = registry.mcp.args;
+    const packageIndex = args.indexOf('--package');
+    const runtimeSpecifier = packageIndex >= 0 ? args[packageIndex + 1] || null : null;
+    const command = typeof registry.mcp.server?.command === 'string' ? registry.mcp.server.command : null;
+    const binary = args.find((arg) => arg === context.runtimeBin) || null;
+    const embeddedRuntime = command === 'npx' &&
+        runtimeSpecifier === context.embeddedRuntimeSpecifier &&
+        binary === context.runtimeBin &&
+        !args.includes('latest');
+    const packagePin = embeddedRuntime;
+    const adminDisabledByDefault = registry.mcp.env?.[CODEX_ADMIN_ENABLE_ENV] === '0';
+    const agentTierByDefault = registry.mcp.env?.ALEMBIC_MCP_TIER === CODEX_DEFAULT_MCP_TIER;
+    const mcpMode = registry.mcp.env?.[CODEX_MCP_MODE_ENV] === '1';
+    const codexShimMode = registry.mcp.env?.[CODEX_MCP_SHIM_ENV] === '1';
+    const missingAssets = registry.plugin.assets.filter((asset) => !existsSync(join(registry.plugin.root, asset)));
+    const requiredSkills = [...CODEX_REQUIRED_SKILLS];
+    const missingSkills = requiredSkills.filter((skill) => !existsSync(join(registry.plugin.root, 'skills', skill, 'SKILL.md')));
+    const mentionsEmbeddedRuntime = registry.plugin.readme.includes(context.embeddedRuntimeSpecifier);
+    const mentionsPinnedRuntime = registry.plugin.readme.includes(context.pinnedRuntimeSpecifier);
+    const readmeOk = mentionsEmbeddedRuntime && mentionsPinnedRuntime;
+    return {
+        assets: {
+            missing: missingAssets,
+            ok: registry.plugin.assets.length > 0 && missingAssets.length === 0,
+            required: registry.plugin.assets,
+        },
+        manifest: {
+            ok: registry.plugin.manifest.ok &&
+                asString(registry.plugin.manifest.value?.name) === CODEX_PLUGIN_NAME,
+            path: registry.plugin.manifest.path,
+            version: asString(registry.plugin.manifest.value?.version) || null,
+        },
+        mcp: {
+            adminDisabledByDefault,
+            agentTierByDefault,
+            binary,
+            codexShimMode,
+            command,
+            embeddedRuntime,
+            mcpMode,
+            ok: embeddedRuntime && adminDisabledByDefault && agentTierByDefault && mcpMode && codexShimMode,
+            packagePin,
+            path: registry.mcp.json.path,
+            pinnedSpecifier: runtimeSpecifier,
+            runtimeSpecifier,
+        },
+        ok: registry.plugin.manifest.ok &&
+            embeddedRuntime &&
+            adminDisabledByDefault &&
+            agentTierByDefault &&
+            mcpMode &&
+            codexShimMode &&
+            missingAssets.length === 0 &&
+            missingSkills.length === 0 &&
+            readmeOk,
+        readme: {
+            mentionsEmbeddedRuntime,
+            mentionsPinnedRuntime,
+            ok: readmeOk,
+            path: registry.plugin.readmePath,
+        },
+        root: registry.plugin.root,
+        skills: {
+            missing: missingSkills,
+            ok: missingSkills.length === 0,
+            required: requiredSkills,
+        },
+    };
+}
+function buildDiagnosticIssues(input) {
+    const issues = [];
+    if (!input.checks.node) {
+        issues.push({
+            action: 'Install Node.js 22 LTS or newer, then restart Codex. Keep MCP and daemon on the same Node executable.',
+            code: 'NODE_VERSION_UNSUPPORTED',
+            message: `Alembic Codex requires Node.js >=22; current runtime is ${process.versions.node}.`,
+            severity: 'error',
+        });
+    }
+    if (!input.checks.npm) {
+        issues.push({
+            action: 'Install npm or use a Node.js distribution that includes npm.',
+            code: 'NPM_UNAVAILABLE',
+            message: String(input.npm.error || 'npm is not available.'),
+            severity: 'error',
+        });
+    }
+    if (!input.checks.npx) {
+        issues.push({
+            action: `Install npm/npx support, or install the fallback runtime globally with npm install -g alembic-ai@${input.packageVersion}.`,
+            code: 'NPX_UNAVAILABLE',
+            message: String(input.npx.error || 'npx is not available.'),
+            severity: 'error',
+        });
+    }
+    if (!input.checks.packagePin) {
+        issues.push({
+            action: 'Update plugins/alembic-codex/.mcp.json to use npx --package ./runtime alembic-codex-mcp, then run npm run prepare:codex-plugin-runtime.',
+            code: 'PLUGIN_RUNTIME_PIN_MISMATCH',
+            message: 'Codex plugin MCP config is not using the embedded Alembic runtime package from ./runtime.',
+            severity: 'error',
+        });
+    }
+    if (!input.checks.pluginMcp && input.checks.packagePin) {
+        issues.push({
+            action: 'Restore plugins/alembic-codex/.mcp.json Codex env defaults: ALEMBIC_MCP_MODE=1, ALEMBIC_CODEX_MCP_MODE=1, ALEMBIC_MCP_TIER=agent, ALEMBIC_CODEX_ENABLE_ADMIN=0.',
+            code: 'PLUGIN_MCP_ENV_INCOMPLETE',
+            message: 'Codex plugin MCP config is missing required Codex runtime environment defaults.',
+            severity: 'error',
+        });
+    }
+    if (!input.checks.pluginManifest || !input.plugin.readme.ok) {
+        issues.push({
+            action: 'Run npm run verify:codex-plugin and repair plugin metadata before publishing.',
+            code: 'PLUGIN_METADATA_INCOMPLETE',
+            message: 'Codex plugin manifest or README metadata is incomplete.',
+            severity: 'error',
+        });
+    }
+    if (!input.checks.pluginAssets || !input.checks.pluginSkills) {
+        issues.push({
+            action: 'Restore missing plugin assets or skills under plugins/alembic-codex.',
+            code: 'PLUGIN_ASSETS_OR_SKILLS_MISSING',
+            message: 'Codex plugin assets or skills are missing from the package.',
+            severity: 'error',
+        });
+    }
+    if (input.requestedTier === 'admin' && !input.adminEnabled) {
+        issues.push({
+            action: `Set ${CODEX_ADMIN_ENABLE_ENV}=1 only for explicit admin workflows.`,
+            code: 'CODEX_ADMIN_OPT_IN_REQUIRED',
+            message: 'Admin tier was requested, but the Codex-specific admin opt-in is disabled.',
+            severity: 'warning',
+        });
+    }
+    return issues;
+}
+function buildDiagnosticNextActions(issues) {
+    if (issues.length === 0) {
+        return ['Alembic Codex runtime checks passed.'];
+    }
+    return [...new Set(issues.map((issue) => issue.action))];
+}
+function buildDiagnosticSummary(issues) {
+    if (issues.length === 0) {
+        return 'Alembic Codex runtime checks passed. Continue with status, init, bootstrap, or priming.';
+    }
+    const errorCount = issues.filter((issue) => issue.severity === 'error').length;
+    const warningCount = issues.filter((issue) => issue.severity === 'warning').length;
+    const parts = [];
+    if (errorCount > 0) {
+        parts.push(`${errorCount} error${errorCount === 1 ? '' : 's'}`);
+    }
+    if (warningCount > 0) {
+        parts.push(`${warningCount} warning${warningCount === 1 ? '' : 's'}`);
+    }
+    return `Alembic Codex diagnostics found ${parts.join(' and ')}. Review issues before starting project knowledge workflows.`;
+}
+function buildRecommendedAction(input) {
+    return {
+        arguments: input.arguments || {},
+        label: input.label,
+        reason: input.reason,
+        startsDaemon: input.startsDaemon,
+        tool: input.tool,
+    };
+}
+function probeCommand(command) {
+    const result = spawnSync(command, ['--version'], {
+        encoding: 'utf8',
+        timeout: 2000,
+    });
+    const output = `${result.stdout || result.stderr || ''}`.trim();
+    return {
+        available: result.status === 0,
+        version: result.status === 0 ? output : null,
+        error: result.status === 0 ? null : result.error?.message || output || `Unable to run ${command}`,
+    };
+}
+function readHealthVersion(health) {
+    const data = health?.data;
+    if (!data || typeof data !== 'object') {
+        return null;
+    }
+    const version = data.version;
+    return typeof version === 'string' ? version : null;
+}

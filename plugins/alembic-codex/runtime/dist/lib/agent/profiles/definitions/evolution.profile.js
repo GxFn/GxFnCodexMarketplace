@@ -1,0 +1,16 @@
+export const EVOLUTION_PROFILES = [
+    {
+        id: 'evolution-audit',
+        title: 'Evolution Audit',
+        serviceKind: 'system-analysis',
+        lifecycle: 'active',
+        basePreset: 'evolution',
+        defaults: {
+            skills: ['evolution_analysis'],
+            memory: { enabled: false },
+            actionSpace: { mode: 'none' },
+        },
+        strategy: { type: 'preset' },
+        projection: 'evolution-audit',
+    },
+];

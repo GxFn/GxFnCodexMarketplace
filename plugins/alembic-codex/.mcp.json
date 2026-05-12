@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "alembic": {
+      "command": "npx",
+      "args": ["-y", "--prefix", "/tmp", "--package", "./runtime", "alembic-codex-mcp"],
+      "cwd": ".",
+      "env": {
+        "ALEMBIC_CHANNEL_ID": "codex",
+        "ALEMBIC_CODEX_ENABLE_ADMIN": "0",
+        "ALEMBIC_CODEX_MCP_MODE": "1",
+        "ALEMBIC_CODEX_PLUGIN_ROOT": ".",
+        "ALEMBIC_MCP_MODE": "1",
+        "ALEMBIC_MCP_TIER": "agent",
+        "npm_config_cache": "/tmp/alembic-codex-npm-cache"
+      }
+    }
+  }
+}

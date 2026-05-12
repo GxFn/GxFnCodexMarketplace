@@ -1,0 +1,25 @@
+export function buildPtyWrapperCommand(pty, runnerPath) {
+    if (process.platform === 'win32') {
+        return { ok: false, error: 'terminal_pty is not available on win32' };
+    }
+    return {
+        ok: true,
+        bin: 'python3',
+        args: [
+            runnerPath,
+            pty.shell,
+            pty.command,
+            String(pty.pty.rows),
+            String(pty.pty.cols),
+            pty.pty.stdin,
+        ],
+        auditArgs: [
+            runnerPath,
+            pty.shell,
+            '<command-redacted>',
+            String(pty.pty.rows),
+            String(pty.pty.cols),
+            pty.pty.stdin,
+        ],
+    };
+}
