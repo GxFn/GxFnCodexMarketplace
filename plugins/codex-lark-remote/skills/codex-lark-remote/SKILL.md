@@ -49,6 +49,13 @@ When the user says "start this plugin" or similar:
 7. Keep the final startup response short: whether Feishu takeover is ready, what
    is missing, and the one next action.
 
+After bridge startup or handoff, the plugin may push a startup intro to
+Feishu/Lark. `startup.receiveId` enables an immediate proactive send; without
+that configured target, the first allowed Feishu/Lark message supplies and
+remembers the current chat, then receives the intro once. Use
+`startup.once: false` only for local debugging when the user wants to see the
+intro repeatedly.
+
 ## Remote Replies
 
 Feishu/Lark text should be treated as the next normal Codex user message in the
@@ -63,7 +70,7 @@ the user's request.
 
 Normal shell commands and command output are hidden from Feishu/Lark by default.
 If the user asks to inspect command details, tell them to send
-`/codex commands on`. Risky commands are still shown with a warning even when
+`commands on`. Risky commands are still shown with a warning even when
 normal command display is off.
 
 Feishu/Lark cannot approve native Codex Desktop permission UI. If a request
@@ -73,13 +80,26 @@ Turn it into a clear Feishu/Lark prompt that says what permission is needed and
 whether the user must approve it in Codex Desktop or can reply with explicit
 text consent in Feishu/Lark.
 
+`退出接管` / `handoff off` exits the current Codex session handoff only and
+keeps the Feishu/Lark bridge connected. `关闭飞书连接` is the explicit command to
+stop the local bridge and disconnect the Feishu/Lark WebSocket; it must ask for
+confirmation before stopping because replies cannot continue after shutdown.
+
 If another Feishu/Lark message arrives while Codex is already running, treat the
 next turn as supplemental guidance for the same conversation. Reconcile it with
 any work already completed by the previous turn instead of restarting from
 scratch.
 
-Observation is separate from takeover. Use `/codex observe` in Feishu/Lark to
-list observable Codex sessions, `/codex observe <number or thread prefix>` to
-stream read-only progress from a selected session, and `/codex observe off` to
+Observation is separate from takeover. Use `observe` in Feishu/Lark to
+list observable Codex sessions, `observe <number or thread prefix>` to
+stream read-only progress from a selected session, and `observe off` to
 stop. Observation must never route Feishu/Lark user messages into the observed
 session.
+
+Cross-thread takeover is controlled from Feishu/Lark. Full-project takeover
+requires a non-empty `lark.allowedUsers` allowlist. The user sends
+`takeover` or `windows` in Feishu/Lark, chooses a local Codex
+project, then chooses any window inside that project, including the window that
+started takeover. Window cards offer read-only Observe and confirmed Takeover
+actions. Do not choose the target in Codex unless the user explicitly asks for
+manual diagnostics.

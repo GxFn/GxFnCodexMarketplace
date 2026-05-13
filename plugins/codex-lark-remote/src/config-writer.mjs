@@ -41,7 +41,7 @@ function normalizeConfigPatch(input) {
   for (const key of ["publicUrl", "defaultRepo"]) {
     if (input[key] !== undefined) patch[key] = input[key];
   }
-  for (const key of ["lark", "repos", "runner", "handoff", "policy"]) {
+  for (const key of ["lark", "repos", "runner", "handoff", "takeover", "startup", "intent", "policy"]) {
     if (input[key] !== undefined) patch[key] = input[key];
   }
   return patch;
@@ -55,6 +55,16 @@ function mergeConfigPatch(base, patch) {
     repos: { ...(base.repos || {}), ...(patch.repos || {}) },
     runner: { ...(base.runner || {}), ...(patch.runner || {}) },
     handoff: { ...(base.handoff || {}), ...(patch.handoff || {}) },
+    takeover: { ...(base.takeover || {}), ...(patch.takeover || {}) },
+    startup: { ...(base.startup || {}), ...(patch.startup || {}) },
+    intent: {
+      ...(base.intent || {}),
+      ...(patch.intent || {}),
+      translator: {
+        ...(base.intent?.translator || {}),
+        ...(patch.intent?.translator || {}),
+      },
+    },
     policy: { ...(base.policy || {}), ...(patch.policy || {}) },
   };
 }

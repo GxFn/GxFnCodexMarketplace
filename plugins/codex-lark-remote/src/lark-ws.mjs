@@ -41,15 +41,21 @@ export class LarkWebSocketReceiver {
     this.lastError = "";
     try {
       const lark = await this.sdkLoader();
+      const forward = async (data) => {
+        this.lastEventAt = nowIso();
+        try {
+          await this.onEvent?.(data);
+        } catch (error) {
+          this.lastError = error.message;
+          this.logger?.error?.(`[codex-lark-remote] Lark event handler failed: ${error.message}`);
+        }
+      };
       const dispatcher = new lark.EventDispatcher({}).register({
         "im.message.receive_v1": async (data) => {
-          this.lastEventAt = nowIso();
-          try {
-            await this.onEvent?.(data);
-          } catch (error) {
-            this.lastError = error.message;
-            this.logger?.error?.(`[codex-lark-remote] Lark event handler failed: ${error.message}`);
-          }
+          await forward(data);
+        },
+        "card.action.trigger": async (data) => {
+          await forward(markCardActionEvent(data));
         },
       });
 
@@ -102,6 +108,17 @@ export class LarkWebSocketReceiver {
       lastError: this.lastError,
     };
   }
+}
+
+function markCardActionEvent(data) {
+  if (data?.header?.event_type || data?.type === "card.action.trigger") return data;
+  return {
+    ...data,
+    header: {
+      ...(data?.header || {}),
+      event_type: "card.action.trigger",
+    },
+  };
 }
 
 export function larkWebSocketEnabled(config = {}) {

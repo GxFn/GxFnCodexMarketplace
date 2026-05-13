@@ -47,6 +47,9 @@ const tools = [
         },
         runner: { type: "object" },
         handoff: { type: "object" },
+        takeover: { type: "object" },
+        startup: { type: "object" },
+        intent: { type: "object" },
         policy: { type: "object" },
       },
     },
@@ -112,6 +115,50 @@ const tools = [
           type: "boolean",
           description: "Set true only after the user explicitly approved storing local thread routing for this conversation so Feishu/Lark can continue it through the local bridge.",
         },
+      },
+    },
+  },
+  {
+    name: "codex_lark_prepare_takeover",
+    description: "Prepare Feishu/Lark-driven takeover. This starts the bridge and stores local routing state; allowed Feishu/Lark users choose the project and window to inspect or take over.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dataDir: { type: "string" },
+        configPath: { type: "string" },
+        cwd: { type: "string", description: "Optional workspace cwd used when resolving takeover targets." },
+        confirmedLocalBridgeHandoff: {
+          type: "boolean",
+          description: "Set true only after the user explicitly approved storing local takeover routing scope for this project.",
+        },
+      },
+    },
+  },
+  {
+    name: "codex_lark_takeover_targets",
+    description: "List Codex windows for a chosen project cwd. Feishu/Lark normally starts from the project list, then enters a project before choosing a window.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dataDir: { type: "string" },
+        configPath: { type: "string" },
+        cwd: { type: "string" },
+        limit: { type: "number", default: 10 },
+      },
+    },
+  },
+  {
+    name: "codex_lark_takeover",
+    description: "Select or execute takeover for a Codex window. By default this should be driven from Feishu/Lark card actions; Codex can use it for diagnostics or manual control.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dataDir: { type: "string" },
+        configPath: { type: "string" },
+        selector: { type: "string", description: "Target option number, thread id prefix, or title fragment." },
+        threadId: { type: "string" },
+        optionIndex: { type: "number" },
+        execute: { type: "boolean", description: "When true, execute takeover. When false, only select/view the target." },
       },
     },
   },
@@ -277,6 +324,36 @@ async function callTool(name, args, request = {}) {
     });
     return textContent(formatHandoff(await diagnoseLarkRemote(handoffArgs)));
   }
+  if (name === "codex_lark_prepare_takeover") {
+    if (args.confirmedLocalBridgeHandoff !== true) {
+      return textContent(formatTakeoverConsentRequired());
+    }
+    const config = await loadConfig(args);
+    if (!hasLarkAppCredentials(config)) {
+      return textContent(formatHandoff(await diagnoseLarkRemote(args)));
+    }
+    const takeoverArgs = applyCodexContext(args, request);
+    if (!takeoverArgs.cwd) {
+      return textContent("Codex Lark Remote cannot prepare takeover because the current workspace cwd is unavailable.");
+    }
+    const bridge = await ensureBridge(takeoverArgs);
+    const state = bridge.state || await readBridgeState(takeoverArgs);
+    await bridgeFetch(state, "/bridge/takeover/scope", {
+      method: "POST",
+      body: {
+        threadId: takeoverArgs.threadId,
+        threadPath: takeoverArgs.threadPath,
+        cwd: takeoverArgs.cwd,
+        startedBy: "mcp",
+      },
+    });
+    return textContent([
+      "Codex Lark Remote takeover control is ready.",
+      `Started from: ${takeoverArgs.cwd}`,
+      "",
+      "From Feishu/Lark, send /codex windows to choose a Codex project, then choose a window to observe or take over.",
+    ].join("\n"));
+  }
   if (name === "codex_lark_stop") {
     return textContent(formatJson(await stopBridge(args)));
   }
@@ -321,6 +398,25 @@ async function callTool(name, args, request = {}) {
         }),
       ),
     );
+  }
+  if (name === "codex_lark_takeover_targets") {
+    const queryParams = new URLSearchParams();
+    if (args.limit) queryParams.set("limit", String(Number(args.limit)));
+    if (args.cwd) queryParams.set("cwd", args.cwd);
+    const query = queryParams.toString() ? `?${queryParams}` : "";
+    const result = await bridgeFetch(state, `/bridge/takeover/targets${query}`);
+    return textContent(result.text || formatJson(result.data));
+  }
+  if (name === "codex_lark_takeover") {
+    const result = await bridgeFetch(state, args.execute === true ? "/bridge/takeover/execute" : "/bridge/takeover/select", {
+      method: "POST",
+      body: {
+        selector: args.selector,
+        threadId: args.threadId,
+        optionIndex: args.optionIndex,
+      },
+    });
+    return textContent(result.text || formatJson(result.data));
   }
   if (name === "codex_lark_task") {
     return textContent(formatJson(await bridgeFetch(state, `/bridge/tasks/${encodeURIComponent(args.id)}`)));
@@ -403,6 +499,17 @@ function formatHandoffConsentRequired() {
     "",
     "If you consent, reply in this Codex chat with:",
     "I approve Codex Lark Remote local bridge handoff for this conversation.",
+  ].join("\n");
+}
+
+function formatTakeoverConsentRequired() {
+  return [
+    "Codex Lark Remote takeover preparation requires explicit consent.",
+    "",
+    "This starts or reuses the local Codex Lark Remote bridge and stores local takeover routing state. It does not send existing chat history to Feishu/Lark, and it does not attach this Codex window as the takeover target. Allowed Feishu/Lark users will choose a project, then choose a window, and must confirm before takeover.",
+    "",
+    "If you consent, reply in this Codex chat with:",
+    "I approve Codex Lark Remote takeover preparation for this project.",
   ].join("\n");
 }
 

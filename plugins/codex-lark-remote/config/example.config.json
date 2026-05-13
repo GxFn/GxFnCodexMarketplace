@@ -31,6 +31,30 @@
     "notifyQueued": false,
     "notifyStarted": false
   },
+  "takeover": {
+    "enabled": true,
+    "projectLimit": 20,
+    "selectionTtlMs": 600000,
+    "maxPendingInputs": 20
+  },
+  "startup": {
+    "enabled": true,
+    "once": true,
+    "rememberLastChat": true,
+    "receiveId": "",
+    "receiveIdType": "chat_id"
+  },
+  "intent": {
+    "enabled": true,
+    "mode": "hybrid",
+    "consoleChatIds": [],
+    "translator": {
+      "provider": "codex-thread",
+      "timeoutMs": 15000,
+      "minConfidence": 0.75
+    },
+    "fallbackToHandoff": true
+  },
   "policy": {
     "requireReviewForCommit": true,
     "requireReviewForPush": true,

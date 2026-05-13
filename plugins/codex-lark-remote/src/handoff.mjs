@@ -297,6 +297,7 @@ function cleanTitle(value) {
     .trim();
   if (!text || /^<[^>]+>$/.test(text)) return "";
   if (/^(system|developer|assistant):/i.test(text)) return "";
+  if (/^#?\s*AGENTS\.md instructions for\b/i.test(text)) return "";
   return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
