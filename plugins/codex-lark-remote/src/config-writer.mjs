@@ -21,6 +21,8 @@ export async function updateRuntimeConfig(input = {}) {
 
 export function formatConfigUpdate(result) {
   const summary = result.summary;
+  const allowedUsersConfigured = summary.lark.allowedUsersCount > 0;
+  const startupTargetConfigured = Boolean(summary.startup?.receiveIdConfigured);
   return [
     "Codex Lark Remote configuration saved",
     `Config: ${result.configPath}`,
@@ -29,10 +31,17 @@ export function formatConfigUpdate(result) {
     `Verification token: ${summary.lark.verificationTokenConfigured ? "configured" : "missing"}`,
     `Encrypt key: ${summary.lark.encryptKeyConfigured ? "configured" : "missing"}`,
     `Allowed users: ${summary.lark.allowedUsersCount}`,
+    `Startup intro target: ${startupTargetConfigured ? "configured" : "learn from first Feishu chat"}`,
     "",
     "Next steps:",
-    "- Run codex_lark_check_auth.",
-    "- Run codex_lark_handoff from the Codex conversation you want to continue in Feishu/Lark.",
+    "- Run codex_lark_check_auth to verify App ID/App Secret.",
+    "- Run codex_lark_verify_setup to start/reuse the bridge and confirm WebSocket is connected.",
+    "- In Feishu Event Configuration, choose long connection, add im.message.receive_v1, then click verify/save.",
+    "- In Feishu Callback Configuration, choose long connection, add card.action.trigger, then click verify/save.",
+    "- After both Feishu/Lark platform pages are verified and published, ask the user for explicit consent and run codex_lark_handoff to connect this Codex conversation.",
+    allowedUsersConfigured
+      ? "- In Feishu/Lark, send 控制台 or console to open the project/session console."
+      : "- Only after Codex confirms the connection is active, send whoami to the bot and add the returned senderId to lark.allowedUsers before project/session takeover.",
   ].join("\n");
 }
 
@@ -89,6 +98,10 @@ function summarizeConfig(config) {
       verificationTokenConfigured: Boolean(config.lark?.verificationToken),
       encryptKeyConfigured: Boolean(config.lark?.encryptKey),
       allowedUsersCount: allowedUsers.length,
+    },
+    startup: {
+      receiveIdConfigured: Boolean(config.startup?.receiveId),
+      receiveIdType: config.startup?.receiveIdType || "",
     },
   };
 }

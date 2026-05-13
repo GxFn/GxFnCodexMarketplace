@@ -4,6 +4,7 @@ import { extractFinalMessage } from "./runner.mjs";
 export const INTENT_NAMES = new Set([
   "system.help",
   "system.status",
+  "setup.verify",
   "identity.whoami",
   "commands.show",
   "commands.hide",

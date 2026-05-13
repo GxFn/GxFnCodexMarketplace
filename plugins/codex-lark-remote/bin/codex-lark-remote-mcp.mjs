@@ -5,8 +5,10 @@ import { formatConfigUpdate, updateRuntimeConfig } from "../src/config-writer.mj
 import { loadConfig, readPackageVersion } from "../src/config.mjs";
 import { diagnoseLarkRemote, formatDiagnostics, formatHandoff } from "../src/diagnostics.mjs";
 import { LarkNotifier } from "../src/notifier.mjs";
+import { formatSetupVerification } from "../src/presenter.mjs";
 import { sanitizeBridgeStatus } from "../src/sanitize.mjs";
 import { formatMissingLarkCredentials, hasLarkAppCredentials } from "../src/setup-guide.mjs";
+import { verifyLarkSetup } from "../src/setup-verification.mjs";
 import { bridgeFetch, bridgeStatus, readBridgeState, startBridgeProcess, stopBridgeProcess } from "../src/supervisor.mjs";
 
 const tools = [
@@ -73,6 +75,19 @@ const tools = [
       properties: {
         dataDir: { type: "string" },
         configPath: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "codex_lark_verify_setup",
+    description: "Verify first-run Feishu/Lark long-connection setup: App credentials, local bridge, WebSocket connection, and the event/callback checks the user should run in Feishu Open Platform.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dataDir: { type: "string" },
+        configPath: { type: "string" },
+        checkAuth: { type: "boolean", description: "Also call Feishu/Lark auth API. Defaults to true." },
+        startBridge: { type: "boolean", description: "Start or reuse the local bridge before checking WebSocket status. Defaults to true." },
       },
     },
   },
@@ -364,6 +379,9 @@ async function callTool(name, args, request = {}) {
     const config = await loadConfig(args);
     const notifier = new LarkNotifier(config.lark || {});
     return textContent(formatJson(await notifier.checkAuth()));
+  }
+  if (name === "codex_lark_verify_setup") {
+    return textContent(formatSetupVerification(await verifyLarkSetup(args)));
   }
   if (name === "codex_lark_diagnose") {
     const diagnostics = await diagnoseLarkRemote(args);

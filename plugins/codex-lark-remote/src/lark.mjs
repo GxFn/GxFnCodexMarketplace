@@ -6,6 +6,10 @@ const MANAGEMENT_ACTIONS = new Set([
   "help",
   "whoami",
   "status",
+  "verify",
+  "verification",
+  "验证",
+  "验证配置",
   "command",
   "commands",
   "show-commands",
@@ -210,6 +214,7 @@ function parseManagementCommand(text) {
   if (!action || action === "help") return { kind: "help" };
   if (action === "whoami") return { kind: "whoami" };
   if (action === "status") return id ? { kind: "task_status", id } : { kind: "status" };
+  if (["verify", "verification", "验证", "验证配置"].includes(action)) return { kind: "setup_verify" };
   if (["command", "commands", "show-commands"].includes(action)) {
     if (["on", "enable", "enabled", "show", "true"].includes(id)) return { kind: "command_visibility", enabled: true };
     if (["off", "disable", "disabled", "hide", "false"].includes(id)) return { kind: "command_visibility", enabled: false };
@@ -226,6 +231,9 @@ function parseManagementCommand(text) {
   if (["observe", "observer", "watch"].includes(action)) {
     if (!id || ["list", "status", "列表", "查看", "窗口", "会话"].includes(id)) return { kind: "observe_list" };
     if (["off", "stop", "disable", "end", "close", "关闭", "停止", "结束"].includes(id)) return { kind: "observe_disable" };
+    if (["session", "sessions", "chat", "chats", "window", "windows"].includes(id) && subAction) {
+      return { kind: "observe_enable", selector: subAction };
+    }
     return { kind: "observe_enable", selector: id };
   }
   if (["projects", "project", "项目"].includes(action)) {
@@ -241,6 +249,9 @@ function parseManagementCommand(text) {
     }
     if (["now", "execute", "confirm", "接管", "确认", "执行"].includes(id)) {
       return { kind: "takeover_execute" };
+    }
+    if (!slashMatch && action === "takeover" && id && !subAction) {
+      return { kind: "takeover_execute", selector: id };
     }
     if (action === "接管" && id && !subAction) {
       return { kind: "takeover_execute", selector: id };
@@ -262,6 +273,10 @@ function parseNaturalManagementCommand(text) {
   if (semanticAction) return semanticAction;
 
   const id = extractCommandId(normalized);
+
+  if (/^(验证配置|验证飞书配置|检查配置|检查飞书配置|测试配置|测试飞书配置|verify setup|verify config|check setup|check config)[。.?？!！]?$/.test(normalized)) {
+    return { kind: "setup_verify" };
+  }
 
   if (id) {
     const approvalAction = parseNaturalApprovalAction(normalized);

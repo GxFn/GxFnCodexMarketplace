@@ -24,9 +24,9 @@ export async function diagnoseLarkRemote(options = {}) {
   const issues = [];
   const warnings = [];
   if (!appCredentialsConfigured) {
-    issues.push("Feishu/Lark appId/appSecret are not configured. Bridge start is blocked until they are saved.");
+    issues.push("Feishu/Lark App ID/App Secret are missing. Save them with codex_lark_configure before starting the bridge.");
   } else if (!status.running) {
-    issues.push("Remote takeover is not running. Start it with codex_lark_handoff from the Codex conversation you want to continue.");
+    issues.push("Bridge is not running. Start it with codex_lark_handoff from a trusted Codex conversation, then use the Feishu/Lark console.");
   }
   if (!webSocketEnabled && !publicUrl) warnings.push("Public callback URL is not configured.");
   if (webSocketEnabled && status.data?.larkWs?.lastError) warnings.push(status.data.larkWs.lastError);
@@ -36,7 +36,7 @@ export async function diagnoseLarkRemote(options = {}) {
   if (!webSocketEnabled && !config.lark?.encryptKey && !process.env.CODEX_LARK_ENCRYPT_KEY) {
     warnings.push("Encrypt key is not configured; signed/encrypted event verification is recommended.");
   }
-  if (allowedUsers.length === 0) warnings.push("No allowedUsers allowlist is configured.");
+  if (allowedUsers.length === 0) warnings.push("No allowedUsers allowlist is configured. This is OK only during first private setup; project/session takeover is blocked until you add your Feishu senderId.");
   if (config.defaultRepo && !config.repos?.[config.defaultRepo]) issues.push(`defaultRepo is not defined in repos: ${config.defaultRepo}`);
   for (const repo of repos) {
     if (!repo.pathExists) issues.push(`Repo path does not exist: ${repo.key}`);
@@ -131,15 +131,16 @@ export function formatHandoff(diagnostics) {
     diagnostics.takeover ? `Takeover: ${diagnostics.takeover.state}` : "Takeover: off",
     `Mac keep-awake: ${formatKeepAwake(diagnostics.bridge?.keepAwake)}`,
     diagnostics.checks.webSocketEnabled
-      ? "Feishu setup: Event Subscriptions -> long connection -> im.message.receive_v1"
+      ? "Feishu setup: Event Configuration -> im.message.receive_v1; Callback Configuration -> card.action.trigger; both use long connection"
       : `Feishu setup: webhook URL ${diagnostics.bridge.webhookUrl || "-"}`,
     diagnostics.paths?.configPath ? `Config: ${diagnostics.paths.configPath}` : "",
     "",
     "From Feishu:",
-    "Send any message to continue this Codex conversation.",
+    "Send 控制台 or console to open the project/session console.",
+    "Use project list, session list, observe session 2, takeover 1.",
     "status",
     "handoff off (exit current handoff only)",
-    "关闭飞书连接 (stop bridge and WebSocket after confirmation)",
+    "close Lark connection / 关闭飞书连接 (stop bridge and WebSocket after confirmation)",
     diagnostics.issues.length ? `\nIssues:\n${diagnostics.issues.map((item) => `- ${item}`).join("\n")}` : "",
     diagnostics.warnings.length ? `\nWarnings:\n${diagnostics.warnings.map((item) => `- ${item}`).join("\n")}` : "",
   ]
@@ -173,23 +174,38 @@ async function pathExists(path) {
 function buildNextActions({ config, status, webhookUrl, publicUrl, webSocketEnabled, allowedUsers }) {
   const actions = [];
   if (!hasLarkAppCredentials(config)) {
-    actions.push("Create a Feishu/Lark internal/custom app in the Feishu/Lark Open Platform.");
-    actions.push("Copy App ID and App Secret, then ask Codex to call codex_lark_configure with lark.appId and lark.appSecret.");
-    actions.push("Do not run codex_lark_start or codex_lark_handoff until app credentials are configured.");
+    actions.push("Create a Feishu/Lark internal/custom app and enable the bot capability.");
+    actions.push("In Event Configuration, choose long connection/WebSocket and subscribe to im.message.receive_v1.");
+    actions.push("In Callback Configuration, choose long connection/WebSocket and subscribe to card.action.trigger.");
+    actions.push("Copy App ID/App Secret to the clipboard, then return to Codex and say 已复制.");
+    actions.push("Codex should read the clipboard, call codex_lark_configure, then run codex_lark_check_auth and codex_lark_verify_setup. Use allowedUsers: [] only for the first private setup.");
     return actions;
   }
-  if (!allowedUsers.length) {
-    actions.push("After the bot can receive messages, send whoami from Feishu/Lark and add the returned senderId to lark.allowedUsers.");
-  }
-  if (!status.running) actions.push("Run codex_lark_handoff from the Codex conversation you want to continue in Feishu/Lark.");
+  if (!status.running) actions.push("Run codex_lark_handoff from a trusted Codex conversation to start the local bridge and open the Feishu/Lark console.");
   if (webSocketEnabled) {
-    actions.push("In Feishu Event Subscriptions, choose long connection and add im.message.receive_v1.");
-    actions.push("Send any message from Feishu/Lark after WebSocket is connected.");
+    const larkWs = status.data?.larkWs || {};
+    const webSocketConnected = Boolean(larkWs.connected);
+    const eventSeen = Boolean(larkWs.lastMessageEventAt);
+    const callbackSeen = Boolean(larkWs.lastCardActionAt);
+    actions.push("Run codex_lark_verify_setup during first-time setup or troubleshooting to confirm the WebSocket connection before Feishu verify/save.");
+    if (webSocketConnected && (!eventSeen || !callbackSeen)) {
+      actions.push("First complete Feishu Event Configuration: choose long connection, add im.message.receive_v1, then click verify/save.");
+      actions.push("Then complete Feishu Callback Configuration: choose long connection, add card.action.trigger, then click verify/save.");
+      actions.push("After both platform pages are verified and published, return to Codex and explicitly approve connecting this conversation to Lark Remote.");
+      actions.push("Only after Codex confirms the connection is active, send whoami from Feishu/Lark.");
+    } else {
+      actions.push("In Feishu Event Configuration, keep long connection selected and add im.message.receive_v1.");
+      actions.push("In Feishu Callback Configuration, keep long connection selected and add card.action.trigger.");
+      actions.push("After the Codex connection is active, send whoami from Feishu/Lark; click a plugin card button to verify card.action.trigger.");
+    }
   } else {
     if (!publicUrl) actions.push("Expose the local bridge with a trusted tunnel/reverse proxy and set CODEX_LARK_PUBLIC_URL.");
     if (webhookUrl) actions.push(`Set Feishu Event Subscription request URL to ${webhookUrl}.`);
     actions.push("Use npm run fixture -- --sign --encrypt --challenge before configuring Feishu.");
     actions.push("Send any message from Feishu/Lark after URL verification succeeds.");
+  }
+  if (!allowedUsers.length) {
+    actions.push("After whoami works, add the returned senderId to lark.allowedUsers before project/session takeover.");
   }
   return actions;
 }

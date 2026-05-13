@@ -1,14 +1,18 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import { DEFAULT_BRIDGE_HOST, ensureDir, loadConfig, nowIso, readPackageVersion, stateFilePath } from "./config.mjs";
+import { DEFAULT_BRIDGE_HOST, configFilePath, ensureDir, loadConfig, nowIso, readPackageVersion, stateFilePath } from "./config.mjs";
 import { runApprovedAction } from "./actions.mjs";
 import { decryptLarkPayload, verifyLarkSignature } from "./crypto.mjs";
 import { updateRuntimeConfig } from "./config-writer.mjs";
 import { activateHandoff, clearHandoff, markHandoffRemoteNoteSent, readHandoff } from "./handoff.mjs";
 import { routeChatTextAction } from "./intent-router.mjs";
-import { setIntentSessionMode } from "./intent-state.mjs";
-import { CONSOLE_COMMAND_EXAMPLES } from "./control-semantics.mjs";
+import {
+  detectIntentLanguage,
+  resolveIntentSessionLanguage,
+  setIntentSessionLanguage,
+  setIntentSessionMode,
+} from "./intent-state.mjs";
 import { KeepAwakeController } from "./keep-awake.mjs";
 import { LarkWebSocketReceiver } from "./lark-ws.mjs";
 import { parseLarkEvent, isUserAllowed, classifyChatText, configuredAllowedUsers } from "./lark.mjs";
@@ -17,6 +21,7 @@ import {
   buildConsoleModeCard,
   buildBridgeStopConfirmCard,
   buildHandoffDisabledCard,
+  buildSetupVerificationCard,
   buildTakeoverConfirmCard,
   buildTakeoverListCard,
   buildTakeoverProjectListCard,
@@ -33,6 +38,7 @@ import {
   formatObservationStatus,
   formatPendingTakeoverInputQueued,
   formatQueued,
+  formatSetupVerification,
   formatTask,
   formatTakeoverActive,
   formatTakeoverList,
@@ -46,6 +52,7 @@ import { RemoteCommandQueue } from "./queue.mjs";
 import { CodexCliRunner } from "./runner.mjs";
 import { activateObservation, clearObservation, CodexSessionObserver, listObservationTargets, readObservation } from "./observer.mjs";
 import { assertLarkAppCredentials } from "./setup-guide.mjs";
+import { buildLarkSetupVerificationReport } from "./setup-verification.mjs";
 import { sendStartupIntroIfNeeded } from "./startup-notice.mjs";
 import {
   activatePendingTakeoverIfIdle,
@@ -368,6 +375,7 @@ async function route(ctx) {
 }
 
 async function handleLarkEvent(ctx, incomingBody, rawBody, headers) {
+  await refreshBridgeConfig(ctx);
   const signature = verifyLarkSignature({
     rawBody,
     headers,
@@ -391,6 +399,7 @@ async function handleLarkEvent(ctx, incomingBody, rawBody, headers) {
 }
 
 export async function processLarkEvent(ctx, body) {
+  await refreshBridgeConfig(ctx);
   const event = parseLarkEvent(body);
   if (event.kind === "card_action") return processLarkCardAction(ctx, event);
   if (event.kind !== "message") return { success: true, ignored: true };
@@ -401,6 +410,7 @@ export async function processLarkEvent(ctx, body) {
     return { success: true, rejected: true };
   }
   if (!event.text) return { success: true, ignored: true };
+  await rememberEventLanguage(ctx, event);
 
   const duplicate = await ctx.queue.findByMessageId(event.messageId);
   if (duplicate) return { success: true, duplicate: true };
@@ -418,7 +428,13 @@ export async function processLarkEvent(ctx, body) {
     return { success: true, rejected: true };
   }
   if (action.kind !== "whoami" || isUserAllowed(event, ctx.config)) {
-    await maybeSendStartupIntro(ctx, { event, reason: "first_authorized_message" });
+    const handledByAction = action.kind === "intent_console_enable";
+    await maybeSendStartupIntro(ctx, {
+      event,
+      language: await languageForEvent(ctx, event),
+      markSentOnly: handledByAction,
+      reason: handledByAction ? "first_authorized_console" : "first_authorized_message",
+    });
   }
   await handleChatAction(ctx, event, action);
   return { success: true };
@@ -436,7 +452,13 @@ async function processLarkCardAction(ctx, event) {
       await replyMaybe(ctx, event.messageId, takeoverAccessError);
       return { success: true, rejected: true };
     }
-    await maybeSendStartupIntro(ctx, { event, reason: "startup_card_action" });
+    const handledByAction = action.kind === "intent_console_enable";
+    await maybeSendStartupIntro(ctx, {
+      event,
+      language: await languageForEvent(ctx, event),
+      markSentOnly: handledByAction,
+      reason: handledByAction ? "startup_console_card_action" : "startup_card_action",
+    });
     await handleChatAction(ctx, event, action);
     return { success: true };
   }
@@ -446,7 +468,7 @@ async function processLarkCardAction(ctx, event) {
     await replyMaybe(ctx, event.messageId, takeoverAccessError);
     return { success: true, rejected: true };
   }
-  await maybeSendStartupIntro(ctx, { event, reason: "first_authorized_card_action" });
+  await maybeSendStartupIntro(ctx, { event, language: await languageForEvent(ctx, event), reason: "first_authorized_card_action" });
   await handleCardAction(ctx, event);
   return { success: true };
 }
@@ -473,6 +495,8 @@ function actionFromStartupCard(event) {
   switch (event.value?.action || event.action || "") {
     case "startup_status":
       return { kind: "status" };
+    case "setup_verify":
+      return { kind: "setup_verify" };
     case "startup_windows":
       return { kind: "takeover_list" };
     case "startup_observe":
@@ -494,21 +518,22 @@ function actionFromStartupCard(event) {
 
 async function handleChatAction(ctx, event, action) {
   const handoff = await readHandoff({ dataDir: ctx.config.dataDir });
-  if (action.kind === "help") return ctx.notifier.reply(event.messageId, formatHelp());
+  const language = await languageForEvent(ctx, event);
+  if (action.kind === "help") return ctx.notifier.reply(event.messageId, formatHelp({ language }));
   if (action.kind === "whoami") return ctx.notifier.reply(event.messageId, formatWhoami(event));
   if (action.kind === "intent_console_enable") {
     await setIntentSessionModeForEvent(ctx, event, "console", "lark");
-    return replyCardOrText(ctx, event.messageId, buildConsoleModeCard(), formatConsoleModeIntro());
+    return replyCardOrText(ctx, event.messageId, buildConsoleModeCard({ language }), formatConsoleModeIntro({ language }));
   }
   if (action.kind === "intent_handoff_mode") {
     await setIntentSessionModeForEvent(ctx, event, "handoff", "lark");
     return ctx.notifier.reply(event.messageId, "已回到任务直通模式。普通消息会直接发送给当前接管的 Codex 会话。");
   }
   if (action.kind === "bridge_stop_confirm") {
-    return replyCardOrText(ctx, event.messageId, buildBridgeStopConfirmCard(), formatBridgeStopConfirm());
+    return replyCardOrText(ctx, event.messageId, buildBridgeStopConfirmCard({ language }), formatBridgeStopConfirm({ language }));
   }
   if (action.kind === "bridge_stop_cancel") {
-    return ctx.notifier.reply(event.messageId, formatBridgeStopCancelled());
+    return ctx.notifier.reply(event.messageId, formatBridgeStopCancelled({ language }));
   }
   if (action.kind === "bridge_stop_execute") {
     return handleBridgeStopExecute(ctx, event);
@@ -518,9 +543,15 @@ async function handleChatAction(ctx, event, action) {
       event.messageId,
       [
         action.reason || "我还不确定你想执行哪个操作。",
-        `你可以说：${CONSOLE_COMMAND_EXAMPLES}，或“发送给当前线程：...”。`,
+        language === "en"
+          ? "You can say: project list, session list, observe session 1, takeover session 2, or send to current thread: ..."
+          : "你可以说：项目列表、会话列表、观察第 1 个会话、接管第 2 个会话，或发送给当前线程：...",
       ].join("\n"),
     );
+  }
+  if (action.kind === "setup_verify") {
+    const report = await buildSetupVerificationFromBridge(ctx);
+    return replyCardOrText(ctx, event.messageId, buildSetupVerificationCard(report, { language }), formatSetupVerification(report, { language }));
   }
   if (action.kind === "status") {
     const counts = await ctx.queue.counts();
@@ -577,7 +608,7 @@ async function handleChatAction(ctx, event, action) {
     const targets = await listObservationTargets({ cwd: handoff?.cwd || "", limit: 10 });
     return ctx.notifier.reply(
       event.messageId,
-      formatObservationList(targets, await readObservation({ dataDir: ctx.config.dataDir })),
+      formatObservationList(targets, await readObservation({ dataDir: ctx.config.dataDir }), { language }),
     );
   }
   if (action.kind === "observe_enable") {
@@ -592,16 +623,16 @@ async function handleChatAction(ctx, event, action) {
         activatedBy: "lark",
       });
       await ctx.observer?.start(observation);
-      return ctx.notifier.reply(event.messageId, formatObservationStatus(observation));
+      return ctx.notifier.reply(event.messageId, formatObservationStatus(observation, { language }));
     } catch (error) {
       const targets = await listObservationTargets({ cwd: handoff?.cwd || "", limit: 10 });
-      return ctx.notifier.reply(event.messageId, `${error.message}\n\n${formatObservationList(targets)}`);
+      return ctx.notifier.reply(event.messageId, `${error.message}\n\n${formatObservationList(targets, null, { language })}`);
     }
   }
   if (action.kind === "observe_disable") {
     const observation = await clearObservation({ dataDir: ctx.config.dataDir });
     await ctx.observer?.stop();
-    return ctx.notifier.reply(event.messageId, formatObservationStatus(observation));
+    return ctx.notifier.reply(event.messageId, formatObservationStatus(observation, { language }));
   }
   if (action.kind === "handoff_disable") {
     const activeHandoff = handoff;
@@ -610,7 +641,7 @@ async function handleChatAction(ctx, event, action) {
     await setIntentSessionModeForEvent(ctx, event, "console", "handoff_disabled");
     await cancelHandoffTasks(ctx, activeHandoff?.threadId || handoffState?.previous?.threadId);
     ctx.keepAwake?.stop();
-    return replyCardOrText(ctx, event.messageId, buildHandoffDisabledCard(), formatHandoffDisabled());
+    return replyCardOrText(ctx, event.messageId, buildHandoffDisabledCard({ language }), formatHandoffDisabled({ language }));
   }
   if (action.kind === "task_status" || action.kind === "task_diff") {
     return ctx.notifier.reply(event.messageId, formatTask(await ctx.queue.get(action.id)));
@@ -651,7 +682,9 @@ async function handleChatAction(ctx, event, action) {
     });
     return ctx.notifier.reply(
       event.messageId,
-      queued?.overflow ? "Too many pending takeover messages. Wait for takeover to activate before sending more." : formatPendingTakeoverInputQueued(queued),
+      queued?.overflow
+        ? (language === "en" ? "Too many held takeover messages. Wait for takeover to activate before sending more." : "暂存消息太多了，请等待接管生效后再发送。")
+        : formatPendingTakeoverInputQueued(queued, { language }),
     );
   }
 
@@ -695,13 +728,14 @@ async function handleCommandVisibility(ctx, event, action) {
 }
 
 async function handleBridgeStopExecute(ctx, event) {
+  const language = await languageForEvent(ctx, event);
   await clearHandoff({ dataDir: ctx.config.dataDir });
   await clearTakeover({ dataDir: ctx.config.dataDir });
   await clearObservation({ dataDir: ctx.config.dataDir });
   await setIntentSessionModeForEvent(ctx, event, "console", "bridge_stopping");
   ctx.observer?.stop();
   ctx.keepAwake?.stop();
-  const result = await ctx.notifier.reply(event.messageId, formatBridgeStopping());
+  const result = await ctx.notifier.reply(event.messageId, formatBridgeStopping({ language }));
   stopBridgeSoon(ctx);
   return result;
 }
@@ -727,17 +761,19 @@ function stopBridgeSoon(ctx) {
 }
 
 async function handleTakeoverProjectList(ctx, event) {
+  const language = await languageForEvent(ctx, event);
   const refreshed = await refreshTakeoverProjectSelection({
     dataDir: ctx.config.dataDir,
     limit: ctx.config.takeover?.projectLimit || 20,
     selectionTtlMs: ctx.config.takeover?.selectionTtlMs,
   });
-  const card = buildTakeoverProjectListCard(refreshed.projects);
-  const text = formatTakeoverProjectList(refreshed.projects);
+  const card = buildTakeoverProjectListCard(refreshed.projects, { language });
+  const text = formatTakeoverProjectList(refreshed.projects, { language });
   return replyCardOrText(ctx, event.messageId, card, text);
 }
 
 async function handleTakeoverProjectSelect(ctx, event, action) {
+  const language = await languageForEvent(ctx, event);
   try {
     const selected = await selectTakeoverProject({
       dataDir: ctx.config.dataDir,
@@ -748,8 +784,8 @@ async function handleTakeoverProjectSelect(ctx, event, action) {
       idleDebounceMs: ctx.config.takeover?.idleDebounceMs,
       selectionTtlMs: ctx.config.takeover?.selectionTtlMs,
     });
-    const card = buildTakeoverListCard(selected.targets, { cwd: selected.project?.cwd || action.cwd || "" });
-    const text = formatTakeoverList(selected.targets, { cwd: selected.project?.cwd || action.cwd || "" });
+    const card = buildTakeoverListCard(selected.targets, { cwd: selected.project?.cwd || action.cwd || "", language });
+    const text = formatTakeoverList(selected.targets, { cwd: selected.project?.cwd || action.cwd || "", language });
     return replyCardOrText(ctx, event.messageId, card, text);
   } catch (error) {
     return ctx.notifier.reply(event.messageId, error.message);
@@ -757,6 +793,7 @@ async function handleTakeoverProjectSelect(ctx, event, action) {
 }
 
 async function handleTakeoverWindowList(ctx, event) {
+  const language = await languageForEvent(ctx, event);
   const scope = await takeoverListScope(ctx);
   const refreshed = await refreshTakeoverSelection({
     dataDir: ctx.config.dataDir,
@@ -768,8 +805,8 @@ async function handleTakeoverWindowList(ctx, event) {
     idleDebounceMs: ctx.config.takeover?.idleDebounceMs,
     selectionTtlMs: ctx.config.takeover?.selectionTtlMs,
   });
-  const card = buildTakeoverListCard(refreshed.targets, { cwd: scope.cwd });
-  const text = formatTakeoverList(refreshed.targets, { cwd: scope.cwd });
+  const card = buildTakeoverListCard(refreshed.targets, { cwd: scope.cwd, language });
+  const text = formatTakeoverList(refreshed.targets, { cwd: scope.cwd, language });
   return replyCardOrText(ctx, event.messageId, card, text);
 }
 
@@ -796,6 +833,7 @@ async function takeoverListScope(ctx) {
 }
 
 async function handleTakeoverSelect(ctx, event, action) {
+  const language = await languageForEvent(ctx, event);
   try {
     const selected = await selectTakeoverTarget({
       dataDir: ctx.config.dataDir,
@@ -810,8 +848,8 @@ async function handleTakeoverSelect(ctx, event, action) {
     return replyCardOrText(
       ctx,
       event.messageId,
-      buildTakeoverSelectedCard(selected.target),
-      formatTakeoverSelected(selected.target),
+      buildTakeoverSelectedCard(selected.target, { language }),
+      formatTakeoverSelected(selected.target, { language }),
     );
   } catch (error) {
     return ctx.notifier.reply(event.messageId, error.message);
@@ -819,6 +857,7 @@ async function handleTakeoverSelect(ctx, event, action) {
 }
 
 async function handleTakeoverConfirm(ctx, event, action) {
+  const language = await languageForEvent(ctx, event);
   try {
     const selected = await selectTakeoverTarget({
       dataDir: ctx.config.dataDir,
@@ -833,8 +872,10 @@ async function handleTakeoverConfirm(ctx, event, action) {
     return replyCardOrText(
       ctx,
       event.messageId,
-      buildTakeoverConfirmCard(selected.target),
-      `确认接管？\n\n${formatTakeoverSelected(selected.target)}`,
+      buildTakeoverConfirmCard(selected.target, { language }),
+      language === "en"
+        ? `Confirm takeover?\n\n${formatTakeoverSelected(selected.target, { language })}`
+        : `确认接管？\n\n${formatTakeoverSelected(selected.target, { language })}`,
     );
   } catch (error) {
     return ctx.notifier.reply(event.messageId, error.message);
@@ -842,6 +883,7 @@ async function handleTakeoverConfirm(ctx, event, action) {
 }
 
 async function handleTakeoverObserve(ctx, event, action) {
+  const language = await languageForEvent(ctx, event);
   try {
     const selected = await selectTakeoverTarget({
       dataDir: ctx.config.dataDir,
@@ -863,13 +905,14 @@ async function handleTakeoverObserve(ctx, event, action) {
       activatedBy: "lark-intent",
     });
     await ctx.observer?.start(observation);
-    return ctx.notifier.reply(event.messageId, formatObservationStatus(observation));
+    return ctx.notifier.reply(event.messageId, formatObservationStatus(observation, { language }));
   } catch (error) {
     return ctx.notifier.reply(event.messageId, error.message);
   }
 }
 
 async function handleTakeoverExecute(ctx, event, action) {
+  const language = await languageForEvent(ctx, event);
   try {
     const executed = await executeTakeoverForBridge(ctx, {
       selector: action.selector,
@@ -880,13 +923,14 @@ async function handleTakeoverExecute(ctx, event, action) {
       userIdHash: event.userIdHash,
     });
     await setIntentSessionModeForEvent(ctx, event, "handoff", "takeover_execute");
-    return ctx.notifier.reply(event.messageId, formatTakeoverExecution(executed));
+    return ctx.notifier.reply(event.messageId, formatTakeoverExecution(executed, { language }));
   } catch (error) {
     return ctx.notifier.reply(event.messageId, error.message);
   }
 }
 
 async function handleCardAction(ctx, event) {
+  const language = await languageForEvent(ctx, event);
   const action = event.value?.action || event.action || "";
   const payload = {
     optionIndex: event.value?.optionIndex,
@@ -918,7 +962,7 @@ async function handleCardAction(ctx, event) {
         activatedBy: "lark-card",
       });
       await ctx.observer?.start(observation);
-      return replyMaybe(ctx, event.messageId, formatObservationStatus(observation));
+      return replyMaybe(ctx, event.messageId, formatObservationStatus(observation, { language }));
     }
     if (action === "takeover_confirm") {
       const selected = await selectTakeoverTarget({
@@ -929,8 +973,10 @@ async function handleCardAction(ctx, event) {
       return replyCardOrText(
         ctx,
         event.messageId,
-        buildTakeoverConfirmCard(selected.target),
-        `确认接管？\n\n${formatTakeoverSelected(selected.target)}`,
+        buildTakeoverConfirmCard(selected.target, { language }),
+        language === "en"
+          ? `Confirm takeover?\n\n${formatTakeoverSelected(selected.target, { language })}`
+          : `确认接管？\n\n${formatTakeoverSelected(selected.target, { language })}`,
       );
     }
     if (action === "takeover_execute") {
@@ -1098,12 +1144,13 @@ async function processPendingTakeover(ctx) {
     ctx.keepAwake?.start();
     const queued = await enqueuePendingTakeoverInputs(ctx, result);
     const messageId = result.state?.lark?.messageId || result.state?.pendingInputs?.at?.(-1)?.messageId || "";
+    const language = await languageForEvent(ctx, { chatIdHash: result.state?.lark?.chatIdHash || "" });
     await replyMaybe(
       ctx,
       messageId,
       [
-        formatTakeoverActive(result.target),
-        queued ? "Pending messages were delivered as the first takeover turn." : "",
+        formatTakeoverActive(result.target, { language }),
+        queued ? (language === "en" ? "Held messages were delivered as the first takeover turn." : "暂存消息已作为接管后的第一轮输入送达。") : "",
       ].filter(Boolean).join("\n"),
     );
     Promise.resolve(ctx.runner?.processAll?.()).catch(() => {});
@@ -1134,9 +1181,31 @@ async function enqueuePendingTakeoverInputs(ctx, result) {
   return created;
 }
 
-function formatTakeoverExecution(executed) {
-  if (executed?.pending) return formatTakeoverPending(executed.target);
-  return formatTakeoverActive(executed?.target);
+function formatTakeoverExecution(executed, options = {}) {
+  if (executed?.pending) return formatTakeoverPending(executed.target, options);
+  return formatTakeoverActive(executed?.target, options);
+}
+
+async function buildSetupVerificationFromBridge(ctx) {
+  let auth = null;
+  if (typeof ctx.notifier?.checkAuth === "function") {
+    try {
+      auth = await ctx.notifier.checkAuth();
+    } catch (error) {
+      auth = { ok: false, hasCredentials: true, message: error.message };
+    }
+  }
+  return buildLarkSetupVerificationReport({
+    config: ctx.config,
+    auth,
+    status: {
+      running: true,
+      state: { url: publicUrl(ctx.config) },
+      data: {
+        larkWs: ctx.larkWs?.status?.() || null,
+      },
+    },
+  });
 }
 
 async function replyCardOrText(ctx, messageId, card, text) {
@@ -1160,9 +1229,56 @@ async function maybeSendStartupIntro(ctx, options = {}) {
   return result;
 }
 
+async function refreshBridgeConfig(ctx) {
+  if (!ctx.config?.dataDir) return ctx.config;
+  try {
+    const targetPath = ctx.config.configPath || configFilePath(ctx.config.dataDir);
+    await fs.access(targetPath);
+    ctx.config = await loadConfig({
+      dataDir: ctx.config.dataDir,
+      configPath: ctx.config.configPath,
+    });
+  } catch (error) {
+    if (error.code === "ENOENT") return ctx.config;
+    ctx.logger?.warn?.(`[codex-lark-remote] config reload failed: ${error.message}`);
+  }
+  return ctx.config;
+}
+
 async function setIntentSessionModeForEvent(ctx, event, mode, reason) {
   if (!ctx.config?.dataDir || !event?.chatIdHash) return null;
-  return setIntentSessionMode({ dataDir: ctx.config.dataDir, event, mode, reason });
+  return setIntentSessionMode({
+    dataDir: ctx.config.dataDir,
+    event,
+    mode,
+    reason,
+    language: await languageForEvent(ctx, event),
+  });
+}
+
+async function rememberEventLanguage(ctx, event) {
+  if (!ctx.config?.dataDir || !event?.chatIdHash) return "";
+  const language = detectIntentLanguage(event.text);
+  if (!language) return "";
+  await setIntentSessionLanguage({
+    dataDir: ctx.config.dataDir,
+    event,
+    language,
+    reason: "lark_input",
+  });
+  return language;
+}
+
+async function languageForEvent(ctx, event) {
+  if (!ctx.config?.dataDir || !event?.chatIdHash) {
+    return detectIntentLanguage(event?.text) || (ctx.config?.intent?.language === "en" ? "en" : "zh");
+  }
+  return resolveIntentSessionLanguage({
+    dataDir: ctx.config.dataDir,
+    event,
+    config: ctx.config,
+    text: event?.text || "",
+  });
 }
 
 function buildHandoffGuidancePrompt(text, runningCommand) {

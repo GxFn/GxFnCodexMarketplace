@@ -51,10 +51,10 @@ export function classifyHandoffDirectText(text, config = {}) {
   if (/^(status|状态|查看状态|看下状态|现在状态|当前状态)[。.?？!！]?$/.test(normalized.toLowerCase())) return { kind: "status" };
   if (/^(commands|command)\s+(on|show|enable|enabled|true)$/i.test(normalized)) return { kind: "command_visibility", enabled: true };
   if (/^(commands|command)\s+(off|hide|disable|disabled|false)$/i.test(normalized)) return { kind: "command_visibility", enabled: false };
-  if (/^(handoff\s+off|退出接管|断开接管|关闭接管|停止接管)[。.!！]?$/.test(normalized.toLowerCase())) {
+  if (/^(handoff\s+off|exit handoff|stop handoff|end handoff|leave handoff|exit takeover|stop takeover|end takeover|退出接管|断开接管|关闭接管|停止接管)[。.!！]?$/.test(normalized.toLowerCase())) {
     return { kind: "handoff_disable" };
   }
-  if (/^(observe\s+off|停止观察|关闭观察)[。.!！]?$/.test(normalized.toLowerCase())) return { kind: "observe_disable" };
+  if (/^(observe\s+off|watch\s+off|stop observing|stop observe|停止观察|关闭观察)[。.!！]?$/.test(normalized.toLowerCase())) return { kind: "observe_disable" };
 
   return {
     kind: "task",
@@ -89,6 +89,8 @@ function actionToIntent(action = {}) {
       return intent("identity.whoami", {}, 1, false, "local command");
     case "status":
       return intent("system.status", {}, 1, false, "local command");
+    case "setup_verify":
+      return intent("setup.verify", {}, 1, false, "local command");
     case "handoff_status":
       return intent("handoff.status", {}, 1, false, "local command");
     case "handoff_disable":
@@ -128,6 +130,8 @@ export function intentToAction(intentValue = {}) {
       return { kind: "help" };
     case "system.status":
       return { kind: "status" };
+    case "setup.verify":
+      return { kind: "setup_verify" };
     case "identity.whoami":
       return { kind: "whoami" };
     case "commands.show":

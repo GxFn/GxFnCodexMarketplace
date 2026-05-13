@@ -12,8 +12,11 @@ export class LarkWebSocketReceiver {
     this.connected = false;
     this.starting = false;
     this.lastEventAt = "";
+    this.lastMessageEventAt = "";
+    this.lastCardActionAt = "";
     this.lastError = "";
     this.message = "";
+    this.eventCounts = {};
   }
 
   async start() {
@@ -41,8 +44,12 @@ export class LarkWebSocketReceiver {
     this.lastError = "";
     try {
       const lark = await this.sdkLoader();
-      const forward = async (data) => {
-        this.lastEventAt = nowIso();
+      const forward = async (data, eventType) => {
+        const seenAt = nowIso();
+        this.lastEventAt = seenAt;
+        this.eventCounts[eventType] = (this.eventCounts[eventType] || 0) + 1;
+        if (eventType === "im.message.receive_v1") this.lastMessageEventAt = seenAt;
+        if (eventType === "card.action.trigger") this.lastCardActionAt = seenAt;
         try {
           await this.onEvent?.(data);
         } catch (error) {
@@ -52,10 +59,10 @@ export class LarkWebSocketReceiver {
       };
       const dispatcher = new lark.EventDispatcher({}).register({
         "im.message.receive_v1": async (data) => {
-          await forward(data);
+          await forward(data, "im.message.receive_v1");
         },
         "card.action.trigger": async (data) => {
-          await forward(markCardActionEvent(data));
+          await forward(markCardActionEvent(data), "card.action.trigger");
         },
       });
 
@@ -105,7 +112,11 @@ export class LarkWebSocketReceiver {
       starting: this.starting,
       message: this.message,
       lastEventAt: this.lastEventAt,
+      lastMessageEventAt: this.lastMessageEventAt,
+      lastCardActionAt: this.lastCardActionAt,
       lastError: this.lastError,
+      eventCounts: { ...this.eventCounts },
+      registeredEvents: ["im.message.receive_v1", "card.action.trigger"],
     };
   }
 }

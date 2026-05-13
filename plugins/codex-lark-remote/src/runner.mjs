@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { nowIso, safeFileName, worktreeRoot } from "./config.mjs";
 import { readHandoff } from "./handoff.mjs";
+import { resolveIntentSessionLanguage } from "./intent-state.mjs";
 import { formatFinal, formatProgress } from "./presenter.mjs";
 import { buildRunnerPrompt } from "./prompt.mjs";
 
@@ -48,6 +49,7 @@ export class CodexCliRunner {
 
       const prompt = buildRunnerPrompt(command, this.config);
       const result = await this.#runCodex(command, prompt);
+      const language = await resolveCommandLanguage(this.config, command);
       const diffSummary = await gitMaybe(["-C", command.worktreePath, "diff", "--stat"]);
       const filesChanged = await gitMaybe(["-C", command.worktreePath, "diff", "--name-only"]);
       const hasChanges = filesChanged.trim().length > 0;
@@ -59,18 +61,20 @@ export class CodexCliRunner {
           result: result.finalMessage || result.stdoutTail || "",
           diffSummary: diffSummary.trim(),
           testSummary: "",
-          error: result.exitCode === 0 ? "" : formatRunnerError(result),
+          error: result.exitCode === 0 ? "" : formatRunnerError(result, { language }),
           completedAt: nowIso(),
         },
         result.exitCode === 0 ? "codex_completed" : "codex_failed",
       );
       await this.#notify(updated, formatFinal(updated));
     } catch (error) {
+      const language = await resolveCommandLanguage(this.config, command);
+      const formattedError = formatPermissionBoundaryNotice(error.message, { language }) || error.message;
       const failed = await this.queue.update(
         command.id,
         {
           status: "failed",
-          error: formatPermissionBoundaryNotice(error.message) || error.message,
+          error: formattedError,
           completedAt: nowIso(),
         },
         "runner_error",
@@ -78,7 +82,7 @@ export class CodexCliRunner {
       await this.#notify(failed || command, formatFinal(failed || {
         ...command,
         status: "failed",
-        error: formatPermissionBoundaryNotice(error.message) || error.message,
+        error: formattedError,
       }));
     }
   }
@@ -116,7 +120,10 @@ export class CodexCliRunner {
     return runProcess(runner.codexPath || "codex", args, {
       timeoutMs: Number(runner.timeoutMs || 30 * 60 * 1000),
       cwd: command.worktreePath,
-      eventOptions: { showCommands: this.config.handoff?.showCommands === true },
+      eventOptions: {
+        showCommands: this.config.handoff?.showCommands === true,
+        language: await resolveCommandLanguage(this.config, command),
+      },
     });
   }
 
@@ -134,6 +141,7 @@ export class CodexCliRunner {
       const prompt = buildHandoffPrompt(command, { promptStyle: this.config.handoff?.promptStyle || "direct" });
       const result = await this.#runCodexResume(command, prompt, { onEvent: progressNotifier });
       if (await this.#isCancelled(command.id)) return;
+      const language = await resolveCommandLanguage(this.config, command);
       const diffSummary = command.projectRoot ? await gitMaybe(["-C", command.projectRoot, "diff", "--stat"]) : "";
 
       const updated = await this.queue.update(
@@ -144,7 +152,7 @@ export class CodexCliRunner {
           progressSummary: result.progressSummary || "",
           diffSummary: diffSummary.trim(),
           testSummary: "",
-          error: result.exitCode === 0 ? "" : formatRunnerError(result),
+          error: result.exitCode === 0 ? "" : formatRunnerError(result, { language }),
           completedAt: nowIso(),
         },
         result.exitCode === 0 ? "codex_resume_completed" : "codex_resume_failed",
@@ -152,11 +160,13 @@ export class CodexCliRunner {
       await this.#notify(updated, formatFinal(updated));
     } catch (error) {
       if (await this.#isCancelled(command.id)) return;
+      const language = await resolveCommandLanguage(this.config, command);
+      const formattedError = formatPermissionBoundaryNotice(error.message, { language }) || error.message;
       const failed = await this.queue.update(
         command.id,
         {
           status: "failed",
-          error: formatPermissionBoundaryNotice(error.message) || error.message,
+          error: formattedError,
           completedAt: nowIso(),
         },
         "runner_error",
@@ -164,7 +174,7 @@ export class CodexCliRunner {
       await this.#notify(failed || command, formatFinal(failed || {
         ...command,
         status: "failed",
-        error: formatPermissionBoundaryNotice(error.message) || error.message,
+        error: formattedError,
       }));
     }
   }
@@ -184,6 +194,10 @@ export class CodexCliRunner {
     const sessionWatcher = createSessionProgressWatcher({
       sessionPath: command.codexSessionPath,
       onEvent,
+      eventOptions: {
+        showCommands: this.config.handoff?.showCommands === true,
+        language: await resolveCommandLanguage(this.config, command),
+      },
     });
     await sessionWatcher.start();
     let result;
@@ -192,7 +206,10 @@ export class CodexCliRunner {
         timeoutMs: Number(runner.timeoutMs || 30 * 60 * 1000),
         cwd: command.projectRoot || undefined,
         onEvent,
-        eventOptions: { showCommands: this.config.handoff?.showCommands === true },
+        eventOptions: {
+          showCommands: this.config.handoff?.showCommands === true,
+          language: await resolveCommandLanguage(this.config, command),
+        },
       });
     } finally {
       await sessionWatcher.stop();
@@ -252,6 +269,19 @@ export class CodexCliRunner {
 function shouldNotifyStarted(config, command) {
   if (command?.notifyStarted === true) return true;
   return config?.handoff?.notifyStarted !== false;
+}
+
+async function resolveCommandLanguage(config = {}, command = {}) {
+  if (!config.dataDir || !command.chatIdHash) return config.intent?.language === "en" ? "en" : "zh";
+  try {
+    return await resolveIntentSessionLanguage({
+      dataDir: config.dataDir,
+      event: { chatIdHash: command.chatIdHash },
+      config,
+    });
+  } catch {
+    return config.intent?.language === "en" ? "en" : "zh";
+  }
 }
 
 export function buildCodexExecArgs({ runner = {}, worktreePath, prompt }) {
@@ -314,9 +344,9 @@ function normalizeDelivery(delivery) {
   return delivery;
 }
 
-function formatRunnerError(result) {
+function formatRunnerError(result, options = {}) {
   const raw = [result.stderrTail, result.stdoutTail].filter(Boolean).join("\n");
-  return formatPermissionBoundaryNotice(raw) || result.stderrTail || `Codex exited with ${result.exitCode}`;
+  return formatPermissionBoundaryNotice(raw, options) || result.stderrTail || `Codex exited with ${result.exitCode}`;
 }
 
 async function runProcess(command, args, { timeoutMs, cwd, onEvent, eventOptions = {} }) {
@@ -500,7 +530,7 @@ export function summarizeCodexEvent(event, { showCommands = false } = {}) {
   return "";
 }
 
-export function summarizeSessionProgressEvent(event) {
+export function summarizeSessionProgressEvent(event, options = {}) {
   const type = String(event?.type || event?.method || "");
   const params = event?.params || {};
   const item = event?.item || params.item || event?.payload || params;
@@ -509,10 +539,10 @@ export function summarizeSessionProgressEvent(event) {
     || (itemType === "message" && item.role === "assistant")
     || /agentMessage/i.test(type);
   if (!isAssistantMessage || item.phase === "final_answer") return "";
-  return summarizeCodexEvent(event);
+  return summarizeCodexEvent(event, options);
 }
 
-export function createSessionProgressWatcher({ sessionPath, onEvent, intervalMs = 500 } = {}) {
+export function createSessionProgressWatcher({ sessionPath, onEvent, intervalMs = 500, eventOptions = {} } = {}) {
   let offset = 0;
   let buffer = "";
   let timer = null;
@@ -549,7 +579,7 @@ export function createSessionProgressWatcher({ sessionPath, onEvent, intervalMs 
     if (!line.trim()) return;
     try {
       const event = JSON.parse(line);
-      const summary = summarizeSessionProgressEvent(event);
+      const summary = summarizeSessionProgressEvent(event, eventOptions);
       if (!summary || summary === lastSummary) return;
       lastSummary = summary;
       chain = chain.then(() => onEvent(event, summary)).catch(() => {});
@@ -598,10 +628,23 @@ function formatUsage(usage) {
   return "Codex turn completed.";
 }
 
-export function formatPermissionBoundaryNotice(value) {
+export function formatPermissionBoundaryNotice(value, options = {}) {
   const reason = classifyPermissionBoundary(value);
   if (!reason) return "";
+  const language = options.language === "zh" ? "zh" : "en";
   const details = oneLineCommandOutput(redactSensitiveText(progressText(value)), 280);
+  if (language === "zh") {
+    return [
+      "需要权限确认",
+      "飞书/Lark 接管不能直接点击 Codex Desktop 的原生权限弹窗。",
+      `原因：${localizePermissionReason(reason, language)}`,
+      details ? `详情：${details}` : "",
+      "",
+      "如果 Mac 上有 Codex 权限弹窗，请回到 Codex Desktop 批准。若只需要文字授权，可以直接在飞书/Lark 里明确回复允许的操作。",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
   return [
     "Permission needed",
     "Feishu/Lark takeover cannot click Codex Desktop permission dialogs directly.",
@@ -617,15 +660,34 @@ export function formatPermissionBoundaryNotice(value) {
 function classifyPermissionBoundary(value) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (!text) return "";
+  if (looksLikeSourceInspectionSummary(text)) return "";
   const checks = [
     [/\b(unacceptable risk|auto[- ]?review.*rejected|rejected due to unacceptable risk|must be denied)\b/i, "Codex security review blocked the action."],
     [/\b(network access is restricted|network access (?:denied|blocked|restricted)|network is (?:denied|blocked|restricted)|dns (?:resolution )?(?:denied|blocked|restricted)|host resolution (?:denied|blocked|restricted)|dependency download failed)\b/i, "Network or dependency access needs approval."],
-    [/\b(approval (?:is )?required|requires? (?:user )?(?:approval|confirmation|permission)|permission dialog|ask-for-approval|escalat(?:e|ion) (?:required|request|needed)|needs approval)\b/i, "Codex approval is required."],
+    [/\b(approval (?:is )?required|approval required|requires? (?:user )?approval|requires approval in Codex Desktop|permission dialog|ask-for-approval|escalat(?:e|ion) (?:required|request|needed)|needs approval)\b/i, "Codex approval is required."],
     [/\b(operation not permitted|not permitted|permission denied|eacces|eperm|access denied)\b/i, "The sandbox or operating system denied the operation."],
     [/\b(read[- ]?only sandbox|outside (?:the )?(?:workspace|sandbox)|workspace-write|writable roots?|not inside a trusted directory|trusted directory|skip-git-repo-check)\b/i, "The current sandbox or trust policy blocked the workspace action."],
     [/\btool call (?:error: )?(?:was )?(?:rejected|denied|blocked)\b/i, "A tool permission boundary interrupted the turn."],
   ];
   return checks.find(([pattern]) => pattern.test(text))?.[1] || "";
+}
+
+function looksLikeSourceInspectionSummary(text) {
+  if (!/\[\d+\s+lines,\s+\d+\s+chars\]/i.test(text)) return false;
+  return !/\b(unacceptable risk|network access is restricted|approval (?:is )?required|approval required|requires approval in Codex Desktop|permission denied|operation not permitted|tool call (?:error: )?(?:was )?(?:rejected|denied|blocked))\b/i.test(text);
+}
+
+function localizePermissionReason(reason, language) {
+  if (language !== "zh") return reason;
+  const map = new Map([
+    ["Codex security review blocked the action.", "Codex 安全审查阻止了这个操作。"],
+    ["Network or dependency access needs approval.", "联网或依赖下载需要批准。"],
+    ["Codex approval is required.", "需要 Codex 权限批准。"],
+    ["The sandbox or operating system denied the operation.", "沙箱或操作系统拒绝了这个操作。"],
+    ["The current sandbox or trust policy blocked the workspace action.", "当前沙箱或信任策略阻止了这个工作区操作。"],
+    ["A tool permission boundary interrupted the turn.", "工具权限边界中断了这一轮执行。"],
+  ]);
+  return map.get(reason) || reason;
 }
 
 function commandFailed(event, item) {

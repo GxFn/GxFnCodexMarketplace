@@ -10,7 +10,7 @@ export async function sendStartupIntroIfNeeded(ctx = {}, options = {}) {
     const startup = config.startup || {};
     if (startup.enabled === false) return { sent: false, reason: "disabled" };
     if (!config.dataDir) return { sent: false, reason: "missing data dir" };
-    if (!ctx.notifier?.send) return { sent: false, reason: "notifier send unavailable" };
+    if (!ctx.notifier?.send && !ctx.notifier?.sendCard && options.markSentOnly !== true) return { sent: false, reason: "notifier send unavailable" };
 
     const state = await readStartupNoticeState(config.dataDir);
     let stateChanged = rememberLastChatTarget(state, config, options.event);
@@ -31,14 +31,31 @@ export async function sendStartupIntroIfNeeded(ctx = {}, options = {}) {
       stateChanged = false;
     }
 
+    if (options.markSentOnly === true) {
+      const sentState = {
+        sentAt: nowIso(),
+        reason: options.reason || "startup_handled_elsewhere",
+        receiveIdType: target.receiveIdType,
+        receiveIdHash: `r_${shortHash(target.receiveId)}`,
+        messageId: "",
+        delivery: "suppressed",
+      };
+      if (once) {
+        state.notices = { ...(state.notices || {}), [key]: sentState };
+        await writeStartupNoticeState(config.dataDir, state);
+      }
+      return { sent: false, reason: "marked handled", state: sentState };
+    }
+
     let delivery = null;
+    const language = normalizeStartupLanguage(options.language || startup.language || config.intent?.language);
     if (ctx.notifier.sendCard) {
-      delivery = await ctx.notifier.sendCard(target.receiveId, buildStartupIntroCard(), {
+      delivery = await ctx.notifier.sendCard(target.receiveId, buildStartupIntroCard({ language }), {
         receiveIdType: target.receiveIdType,
       });
     }
     if (!delivery?.ok) {
-      delivery = await ctx.notifier.send(target.receiveId, formatStartupIntro(), {
+      delivery = await ctx.notifier.send(target.receiveId, formatStartupIntro({ language }), {
         receiveIdType: target.receiveIdType,
       });
     }
@@ -156,4 +173,8 @@ function firstNonEmpty(...values) {
 
 function normalizeReceiveIdType(value) {
   return String(value || "chat_id").trim() || "chat_id";
+}
+
+function normalizeStartupLanguage(value) {
+  return String(value || "").trim().toLowerCase() === "en" ? "en" : "zh";
 }

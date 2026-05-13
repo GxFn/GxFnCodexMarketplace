@@ -1,7 +1,7 @@
 {
   "name": "codex-lark-remote",
-  "version": "0.2.1",
-  "description": "Continue Codex from Feishu/Lark chat.",
+  "version": "0.2.2",
+  "description": "Control Codex sessions from Feishu/Lark chat.",
   "type": "module",
   "bin": {
     "codex-lark-remote": "./bin/codex-lark-bridge.mjs",

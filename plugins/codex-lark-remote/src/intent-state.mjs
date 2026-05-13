@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { ensureDir, intentConsoleFilePath, nowIso, resolveDataDir, shortHash } from "./config.mjs";
 
 const VALID_MODES = new Set(["console", "handoff"]);
+const VALID_LANGUAGES = new Set(["zh", "en"]);
 
 export async function readIntentState(options = {}) {
   const dataDir = resolveDataDir(options.dataDir);
@@ -27,6 +28,7 @@ export async function readIntentSession(options = {}) {
   if (isConfiguredConsoleChat(options.event, options.config)) {
     return {
       mode: "console",
+      language: normalizeIntentLanguage(options.config?.intent?.language),
       chatIdHash: key,
       configured: true,
     };
@@ -43,6 +45,44 @@ export async function resolveIntentSessionMode(options = {}) {
 export async function setIntentSessionMode(options = {}) {
   const mode = String(options.mode || "").trim();
   if (!VALID_MODES.has(mode)) throw new Error(`Unknown intent session mode: ${mode}`);
+  const language = normalizeIntentLanguage(options.language);
+  return writeIntentSession({
+    ...options,
+    patch: { mode, ...(language ? { language } : {}) },
+  });
+}
+
+export async function setIntentSessionLanguage(options = {}) {
+  const language = normalizeIntentLanguage(options.language);
+  if (!language) return null;
+  return writeIntentSession({
+    ...options,
+    patch: { language },
+  });
+}
+
+export async function resolveIntentSessionLanguage(options = {}) {
+  const detected = detectIntentLanguage(options.text || options.event?.text || "");
+  if (detected) return detected;
+  const session = await readIntentSession(options);
+  return normalizeIntentLanguage(session?.language)
+    || normalizeIntentLanguage(options.config?.intent?.language)
+    || "zh";
+}
+
+export function detectIntentLanguage(text) {
+  const value = String(text || "");
+  if (/[\u3400-\u9fff]/.test(value)) return "zh";
+  if (/[A-Za-z]/.test(value)) return "en";
+  return "";
+}
+
+export function normalizeIntentLanguage(value) {
+  const language = String(value || "").trim().toLowerCase();
+  return VALID_LANGUAGES.has(language) ? language : "";
+}
+
+async function writeIntentSession(options = {}) {
   const dataDir = resolveDataDir(options.dataDir);
   const key = intentSessionKey(options.event);
   if (!key) return null;
@@ -50,7 +90,7 @@ export async function setIntentSessionMode(options = {}) {
   const previous = state.sessions?.[key] || {};
   const session = {
     ...previous,
-    mode,
+    ...(options.patch || {}),
     chatId: options.event?.chatId || previous.chatId || "",
     chatIdHash: key,
     userIdHash: options.event?.userIdHash || previous.userIdHash || "",

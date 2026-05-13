@@ -1,6 +1,6 @@
 {
   "name": "codex-lark-remote",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Remote Codex programming from Feishu/Lark chat.",
   "author": {
     "name": "Lark Remote Contributors"
@@ -17,8 +17,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Lark Remote",
-    "shortDescription": "Continue Codex from Feishu/Lark chat.",
-    "longDescription": "Lark Remote lets you continue the current Codex conversation from Feishu/Lark. Start it in an open Codex chat, then send normal messages to the Feishu/Lark bot to keep working in the same conversation.",
+    "shortDescription": "Control Codex sessions from Feishu/Lark chat.",
+    "longDescription": "Lark Remote connects Feishu/Lark to local Codex sessions. Start the bridge from Codex, then use the Feishu/Lark console to list projects, observe sessions, or take over a selected Codex session.",
     "developerName": "Lark Remote Contributors",
     "category": "Productivity",
     "capabilities": [
@@ -27,7 +27,7 @@
       "Interactive"
     ],
     "defaultPrompt": [
-      "Start Lark Remote for this conversation",
+      "Start Lark Remote for this Codex workspace",
       "Configure Lark Remote with my Feishu/Lark app credentials",
       "Show Lark Remote setup status"
     ],
