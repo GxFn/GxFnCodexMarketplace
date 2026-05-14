@@ -307,7 +307,8 @@ async function callTool(name, args, request = {}) {
   if (name === "codex_lark_start") {
     const config = await loadConfig(args);
     if (!hasLarkAppCredentials(config)) return textContent(formatMissingLarkCredentials(config));
-    await ensureBridge(args);
+    const bridge = await ensureBridge(args);
+    if (!bridge.running) return textContent(formatBridgeStartFailure(bridge, "start"));
     return textContent(formatDiagnostics(await diagnoseLarkRemote(args)));
   }
   if (name === "codex_lark_handoff") {
@@ -325,7 +326,7 @@ async function callTool(name, args, request = {}) {
     const bridge = await ensureBridge(handoffArgs);
     const state = bridge.state || await readBridgeState(handoffArgs);
     if (!state?.url || !state?.token) {
-      return textContent("Codex Lark Remote bridge is not running. Use codex_lark_start first.");
+      return textContent(formatBridgeStartFailure(bridge, "handoff"));
     }
     await bridgeFetch(state, "/bridge/handoff", {
       method: "POST",
@@ -353,6 +354,9 @@ async function callTool(name, args, request = {}) {
     }
     const bridge = await ensureBridge(takeoverArgs);
     const state = bridge.state || await readBridgeState(takeoverArgs);
+    if (!state?.url || !state?.token) {
+      return textContent(formatBridgeStartFailure(bridge, "takeover preparation"));
+    }
     await bridgeFetch(state, "/bridge/takeover/scope", {
       method: "POST",
       body: {
@@ -399,7 +403,7 @@ async function callTool(name, args, request = {}) {
     }
     return {
       isError: true,
-      content: [{ type: "text", text: "Codex Lark Remote bridge is not running. Use codex_lark_start first." }],
+      content: [{ type: "text", text: formatBridgeStartFailure({ config }, "bridge request") }],
     };
   }
 
@@ -499,6 +503,27 @@ function formatStatus(status) {
 
 function formatJson(value) {
   return JSON.stringify(value, null, 2);
+}
+
+function formatBridgeStartFailure(result = {}, operation = "bridge startup") {
+  const reason = result.message || "Bridge did not report a running state.";
+  const logPath = result.config?.dataDir ? `${result.config.dataDir}/bridge.log` : "~/.codex-lark-remote/bridge.log";
+  const retry = operation === "start"
+    ? "Retry codex_lark_start, or retry codex_lark_handoff after explicit consent."
+    : operation === "handoff"
+      ? "Retry codex_lark_handoff after fixing the reason above."
+      : operation === "takeover preparation"
+        ? "Retry codex_lark_prepare_takeover after fixing the reason above."
+        : "Start or attach Lark Remote after fixing the reason above.";
+
+  return [
+    "Codex Lark Remote bridge could not start.",
+    `Reason: ${reason}`,
+    `Log: ${logPath}`,
+    "",
+    "No separate pre-start step is required: handoff and takeover preparation both start or reuse the bridge themselves.",
+    retry,
+  ].join("\n");
 }
 
 function response(id, result) {

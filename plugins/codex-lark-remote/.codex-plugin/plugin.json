@@ -1,7 +1,7 @@
 {
   "name": "codex-lark-remote",
-  "version": "0.2.3",
-  "description": "Remote Codex programming from Feishu/Lark chat.",
+  "version": "0.2.4",
+  "description": "Control, observe, and take over local Codex sessions from Feishu/Lark.",
   "author": {
     "name": "Lark Remote Contributors"
   },
@@ -17,8 +17,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Lark Remote",
-    "shortDescription": "Control Codex sessions from Feishu/Lark chat.",
-    "longDescription": "Lark Remote connects Feishu/Lark to local Codex sessions. Start the bridge from Codex, then use the Feishu/Lark console to list projects, observe sessions, or take over a selected Codex session.",
+    "shortDescription": "Control, observe, and take over Codex sessions from Feishu/Lark.",
+    "longDescription": "Lark Remote connects Feishu/Lark to a local Codex bridge. Use the natural-language console to list projects and sessions, observe read-only progress, or take over a selected Codex session. After takeover, Feishu/Lark messages go directly to that Codex session as tasks or follow-up instructions.",
     "developerName": "Lark Remote Contributors",
     "category": "Productivity",
     "capabilities": [
