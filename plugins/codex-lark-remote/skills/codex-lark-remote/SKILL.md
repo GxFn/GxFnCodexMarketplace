@@ -104,10 +104,10 @@ handoff only and keeps the Feishu/Lark bridge connected. `关闭飞书连接` /
 disconnect the Feishu/Lark WebSocket; it must ask for confirmation before
 stopping because replies cannot continue after shutdown.
 
-If another Feishu/Lark message arrives while the selected Codex session is
-already running, treat the next turn as supplemental guidance for that selected
-session. Reconcile it with any work already completed by the previous turn
-instead of restarting from scratch.
+If another Feishu/Lark message arrives while the selected Codex Desktop session
+is already running, do not queue or reinterpret it. Tell the user the selected
+session is busy, the message was not sent, and they should resend it after the
+current turn finishes or after takeover becomes active.
 
 Observation is separate from takeover. Use `observe` in Feishu/Lark to
 list observable Codex sessions, `observe <number or thread prefix>` to

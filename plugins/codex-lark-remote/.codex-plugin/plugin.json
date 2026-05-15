@@ -1,6 +1,6 @@
 {
   "name": "codex-lark-remote",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Control, observe, and take over local Codex sessions from Feishu/Lark.",
   "author": {
     "name": "Lark Remote Contributors"

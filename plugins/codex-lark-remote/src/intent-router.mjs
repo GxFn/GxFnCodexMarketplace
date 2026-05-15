@@ -31,6 +31,11 @@ export async function routeChatTextAction(ctx, event, initialAction) {
     return routeConsoleText(ctx, event, initialAction, { handoff, takeover, session });
   }
 
+  if (takeover?.state === "pending") {
+    const pendingAction = parsePendingTakeoverControlText(text);
+    if (pendingAction) return pendingAction;
+  }
+
   if (handoff?.active || takeover?.state === "pending" || session?.mode === "handoff") {
     return classifyHandoffDirectText(text, ctx.config);
   }
@@ -189,6 +194,14 @@ function publicClarifyReason(reason) {
   }
   if (/^rules did not match$/i.test(text)) return "我还没识别出这条控制指令。";
   return text;
+}
+
+function parsePendingTakeoverControlText(text) {
+  const normalized = normalizeControlText(text).toLowerCase();
+  if (/^(cancel|取消|取消等待|取消接管|取消接管准备|停止等待|别等了|不等了|cancel takeover|cancel handoff|takeover off|stop takeover wait|stop waiting)[。.!！]?$/.test(normalized)) {
+    return { kind: "takeover_disable" };
+  }
+  return null;
 }
 
 function buildIntentContext({ handoff, takeover, event }) {

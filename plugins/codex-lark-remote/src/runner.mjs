@@ -5,8 +5,9 @@ import { promisify } from "node:util";
 import { nowIso, safeFileName, worktreeRoot } from "./config.mjs";
 import { readHandoff } from "./handoff.mjs";
 import { resolveIntentSessionLanguage } from "./intent-state.mjs";
-import { formatFinal, formatProgress } from "./presenter.mjs";
+import { formatFinal, formatHandoffSessionBusy, formatProgress } from "./presenter.mjs";
 import { buildRunnerPrompt } from "./prompt.mjs";
+import { detectSessionStatus } from "./takeover.mjs";
 
 const execFileP = promisify(execFile);
 
@@ -130,8 +131,25 @@ export class CodexCliRunner {
   async #runHandoffOne(command) {
     try {
       if (await this.#isCancelled(command.id)) return;
+      const busy = await detectBusyHandoffSession(this.config, command);
+      if (busy) {
+        const language = await resolveCommandLanguage(this.config, command);
+        const message = formatHandoffSessionBusy(command, busy, { language });
+        const cancelled = await this.queue.update(
+          command.id,
+          {
+            status: "cancelled",
+            error: message,
+            completedAt: nowIso(),
+          },
+          "handoff_session_busy",
+        );
+        await this.#notify(cancelled || command, message);
+        return;
+      }
       if (shouldNotifyStarted(this.config, command)) {
-        await this.#notify(command, "Started working on the Feishu/Lark message.");
+        const language = await resolveCommandLanguage(this.config, command);
+        await this.#notify(command, formatHandoffStarted({ language }));
       }
       const progressNotifier = createProgressNotifier({
         command,
@@ -269,6 +287,20 @@ export class CodexCliRunner {
 function shouldNotifyStarted(config, command) {
   if (command?.notifyStarted === true) return true;
   return config?.handoff?.notifyStarted !== false;
+}
+
+function formatHandoffStarted(options = {}) {
+  return options.language === "en"
+    ? "Received. Codex is thinking through this message."
+    : "已收到，Codex 正在思考并处理这条消息。";
+}
+
+async function detectBusyHandoffSession(config = {}, command = {}) {
+  if (command.mode !== "thread_handoff" || !command.codexSessionPath) return null;
+  const status = await detectSessionStatus(command.codexSessionPath, {
+    idleDebounceMs: config.handoff?.idleDebounceMs ?? config.takeover?.idleDebounceMs,
+  });
+  return status.status === "running" ? status : null;
 }
 
 async function resolveCommandLanguage(config = {}, command = {}) {
@@ -467,6 +499,25 @@ export function extractProgressSummary(stdout, options = {}) {
     }
   }
   return progress.join("\n");
+}
+
+export async function readSessionLastTurnSummary(sessionPath, options = {}) {
+  const text = await readFileTail(sessionPath, Number(options.maxBytes || 512 * 1024));
+  const records = parseJsonRecords(text);
+  const turn = lastCompletedTurn(records);
+  if (!turn.length) return null;
+  const finalMessage = extractLastAssistantFinalMessage(turn);
+  const progress = [];
+  for (const event of turn) {
+    const summary = summarizeCodexEvent(event, options);
+    if (!summary || /^Codex turn completed\b/i.test(summary)) continue;
+    if (progress[progress.length - 1] !== summary) progress.push(summary);
+  }
+  if (!finalMessage && !progress.length) return null;
+  return {
+    finalMessage,
+    progressSummary: progress.join("\n"),
+  };
 }
 
 export function summarizeCodexEvent(event, { showCommands = false } = {}) {
@@ -744,9 +795,96 @@ function textFromEvent(event) {
       .join("\n")
       .trim();
   }
-  const item = event?.item || {};
+  const item = event?.item || event?.params?.item || payload.item || {};
   if (typeof item.text === "string") return item.text;
+  if (typeof item.message === "string") return item.message;
   return event?.message || event?.text || event?.content || event?.delta || "";
+}
+
+async function readFileTail(filePath, maxBytes) {
+  if (!filePath) return "";
+  try {
+    const stat = await fs.stat(filePath);
+    const length = Math.min(stat.size, Math.max(1024, maxBytes));
+    const start = Math.max(0, stat.size - length);
+    const handle = await fs.open(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      await handle.read(buffer, 0, length, start);
+      return buffer.toString("utf8");
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return "";
+  }
+}
+
+function parseJsonRecords(text) {
+  const records = [];
+  for (const line of String(text || "").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      records.push(JSON.parse(line));
+    } catch {
+      // Tail reads can start in the middle of a JSONL record.
+    }
+  }
+  return records;
+}
+
+function lastCompletedTurn(records) {
+  const completedIndex = findLastIndex(records, isTurnCompletedEvent);
+  if (completedIndex < 0) return [];
+  const startIndex = findLastIndex(records.slice(0, completedIndex + 1), isTurnStartedEvent);
+  if (startIndex >= 0) return records.slice(startIndex, completedIndex + 1);
+  const previousCompletedIndex = findLastIndex(records.slice(0, completedIndex), isTurnCompletedEvent);
+  return records.slice(previousCompletedIndex + 1, completedIndex + 1);
+}
+
+function extractLastAssistantFinalMessage(records) {
+  let final = "";
+  for (const event of records) {
+    const text = textFromEvent(event);
+    if (isAssistantFinalEvent(event) && typeof text === "string" && text.trim()) {
+      final = text.trim();
+    }
+  }
+  return final;
+}
+
+function isTurnStartedEvent(event) {
+  const itemType = String((event?.item || event?.params?.item || event?.payload || {}).type || "");
+  return itemType === "task_started"
+    || /(?:turn|response)[./_-]?started/i.test(`${event?.type || ""} ${event?.method || ""} ${event?.payload?.phase || ""}`);
+}
+
+function isTurnCompletedEvent(event) {
+  const itemType = String((event?.item || event?.params?.item || event?.payload || {}).type || "");
+  return itemType === "task_complete"
+    || /(?:turn|response)[./_-]?completed/i.test(`${event?.type || ""} ${event?.method || ""} ${event?.payload?.phase || ""}`);
+}
+
+function isAssistantFinalEvent(event) {
+  const params = event?.params || {};
+  const payload = event?.payload || params || {};
+  const item = event?.item || params.item || payload.item || {};
+  const type = String(event?.type || event?.method || "");
+  const itemType = String(item.type || payload.type || "");
+  const phase = String(item.phase || payload.phase || "");
+  const role = String(item.role || payload.role || "");
+  return (
+    (itemType === "agent_message" && (phase === "final_answer" || type === "item.completed"))
+    || (itemType === "message" && role === "assistant" && phase === "final_answer")
+    || /final_answer/i.test(`${type} ${phase}`)
+  );
+}
+
+function findLastIndex(items, predicate) {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (predicate(items[index], index, items)) return index;
+  }
+  return -1;
 }
 
 function progressText(value) {

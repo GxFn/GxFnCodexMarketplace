@@ -409,11 +409,12 @@ export function formatSetupVerification(report = {}) {
     `WebSocket 长连接: ${formatSetupCheck(checks.webSocketConnected, "已连接", larkWs.message || "未连接")}`,
     `事件配置 im.message.receive_v1: ${formatSetupCheck(checks.messageEventReceived, `已收到消息事件${formatSeenAt(larkWs.lastMessageEventAt)}`, "等待飞书消息事件")}`,
     `回调配置 card.action.trigger: ${formatSetupCheck(checks.cardCallbackReceived, `已收到卡片回调${formatSeenAt(larkWs.lastCardActionAt)}`, "等待卡片回调")}`,
+    `允许用户: ${formatSetupCheck(checks.allowedUsersConfigured, `${report.lark?.allowedUsersCount || 0} 个`, "未配置")}`,
     "",
-    "现在请先去飞书后台做长连接配置验证，不要先发 whoami。",
+    "推荐顺序：先在飞书后台验证长连接事件和卡片回调，再发送 whoami 配置允许用户。",
     "事件配置：使用长连接接收，添加 im.message.receive_v1，点击验证/保存。",
     "回调配置：使用长连接接收，添加 card.action.trigger，点击验证/保存。",
-    "这两步完成并发布后，先回到 Codex 同意连接当前会话；连接生效后再给机器人发送 whoami。",
+    "两项后台配置发布后，回到 Codex 同意连接当前会话；连接生效后再给机器人发送 whoami。",
     "",
     report.nextActions?.length ? `下一步:\n${report.nextActions.map((item) => `- ${item}`).join("\n")}` : "",
   ].filter(Boolean).join("\n");
@@ -431,12 +432,14 @@ export function buildSetupVerificationCard(report = {}) {
           setupVerificationLine("WebSocket 长连接", report.checks?.webSocketConnected, "已连接", report.bridge?.larkWs?.message || "未连接"),
           setupVerificationLine("事件配置 im.message.receive_v1", report.checks?.messageEventReceived, `已收到消息事件${formatSeenAt(report.bridge?.larkWs?.lastMessageEventAt)}`, "等待飞书消息事件"),
           setupVerificationLine("回调配置 card.action.trigger", report.checks?.cardCallbackReceived, `已收到卡片回调${formatSeenAt(report.bridge?.larkWs?.lastCardActionAt)}`, "等待卡片回调"),
+          setupVerificationLine("允许用户 lark.allowedUsers", report.checks?.allowedUsersConfigured, `${report.lark?.allowedUsersCount || 0} 个`, "未配置"),
           "",
-          "**现在先去飞书后台完成长连接配置验证，不要先发 `whoami`。**",
+          "**推荐顺序：先验证后台长连接，再配置允许用户。**",
           "事件配置：使用长连接接收，添加 `im.message.receive_v1`，点击验证/保存。",
           "回调配置：使用长连接接收，添加 `card.action.trigger`，点击验证/保存。",
-          "两项都验证通过并发布后，先回到 Codex 同意连接当前会话；连接生效后再发送 `whoami` 验证消息事件。",
-          "看到插件卡片后，再点击下面的“刷新验证”验证卡片回调。",
+          "两项都验证通过并发布后，回到 Codex 同意连接当前会话；连接生效后再发送 `whoami`，把返回的 senderId 加入 allowlist。",
+          "看到插件卡片后，点击下面的“刷新验证”确认卡片回调已打通。",
+          report.nextActions?.length ? `\n**下一步**\n${report.nextActions.slice(0, 4).map((item) => `- ${item}`).join("\n")}` : "",
         ].join("\n"),
       },
       {
@@ -465,6 +468,46 @@ export function formatBridgeStatus({ config, counts, workerBusy, url, larkWs, ha
     `Pending replies: ${formatCounts(counts)}`,
     `Codex worker: ${workerBusy ? "busy" : "idle"}`,
   ].join("\n");
+}
+
+export function buildBridgeStatusCard(status = {}, options = {}) {
+  const language = languageOf(options);
+  const mode = bridgeMode(status, language);
+  const route = bridgeMessageRoute(status, language);
+  const target = status.takeover?.target || status.handoff || status.observation || {};
+  const connected = status.larkWs?.connected === true;
+  const elements = [
+    {
+      tag: "markdown",
+      content: language === "en"
+        ? [
+          `**Mode**: ${mode}`,
+          `**Next normal message**: ${route}`,
+          `**Lark WebSocket**: ${connected ? "connected" : status.larkWs?.message || "not connected"}`,
+          `**Worker**: ${status.workerBusy ? "busy" : "idle"}`,
+          target.threadId ? `**Target**: ${escapeCardText(target.name || "Untitled Codex chat")} (${String(target.threadId).slice(0, 8)})` : "",
+          target.cwd ? `**Folder**: ${escapeCardText(target.cwd)}` : "",
+        ].filter(Boolean).join("\n")
+        : [
+          `**当前模式**: ${mode}`,
+          `**下一条普通消息**: ${route}`,
+          `**飞书长连接**: ${connected ? "已连接" : status.larkWs?.message || "未连接"}`,
+          `**Codex 执行器**: ${status.workerBusy ? "忙碌" : "空闲"}`,
+          target.threadId ? `**目标会话**: ${escapeCardText(target.name || "未命名 Codex 对话")} (${String(target.threadId).slice(0, 8)})` : "",
+          target.cwd ? `**项目目录**: ${escapeCardText(target.cwd)}` : "",
+        ].filter(Boolean).join("\n"),
+    },
+    {
+      tag: "action",
+      actions: [
+        startupButton(language === "en" ? "Projects/Sessions" : "项目/会话", "startup_windows", "primary"),
+        startupButton(language === "en" ? "Observe" : "观察", "startup_observe", "default"),
+        startupButton(language === "en" ? "Setup Check" : "配置验证", "setup_verify", "default"),
+        startupButton(language === "en" ? "Close Connection" : "关闭连接", "bridge_stop_prompt", "danger"),
+      ],
+    },
+  ];
+  return baseCard({ title: language === "en" ? "Lark Remote Status" : "Lark Remote 状态", elements });
 }
 
 function setupVerificationLine(label, ok, okText, failText) {
@@ -618,7 +661,98 @@ export function formatTakeoverStatus(takeover) {
     target.name ? `标题: ${target.name}` : "",
     target.cwd ? `目录: ${target.cwd}` : "",
     target.status ? `会话状态: ${formatWindowStatus(target.status)}` : "",
-    takeover.pendingInputs?.length ? `待发送消息: ${takeover.pendingInputs.length}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+export function formatHandoffModeEnabled(handoff, options = {}) {
+  const language = languageOf(options);
+  const thread = String(handoff?.threadId || "").slice(0, 8) || "unknown";
+  if (language === "en") {
+    return [
+      "Returned to direct task mode.",
+      `Normal messages now go directly to the current Codex session${thread ? ` (${thread})` : ""}.`,
+      "Send console to temporarily return to project/session control.",
+    ].join("\n");
+  }
+  return [
+    "已回到任务直通模式。",
+    `普通消息会直接发送给当前接管的 Codex 会话${thread ? `（${thread}）` : ""}。`,
+    "发送“控制台”可临时回到项目/会话控制台。",
+  ].join("\n");
+}
+
+export function formatHandoffModeUnavailable(options = {}) {
+  if (languageOf(options) === "en") {
+    return [
+      "No Codex session is currently taken over.",
+      "Use the console to choose a project/session first, then take over a session.",
+    ].join("\n");
+  }
+  return [
+    "当前没有正在接管的 Codex 会话。",
+    "请先在控制台选择项目/会话，然后接管一个会话。",
+  ].join("\n");
+}
+
+export function formatTakeoverPreparationCancelled({ takeover, handoff } = {}, options = {}) {
+  const language = languageOf(options);
+  const pendingCount = takeover?.pendingInputs?.length || 0;
+  const activeThread = String(handoff?.threadId || "").slice(0, 8);
+  if (language === "en") {
+    return [
+      "Cancelled the current takeover selection/wait.",
+      pendingCount ? "Held messages from this waiting takeover were discarded." : "",
+      handoff?.active
+        ? `You are still in direct task mode for the previous Codex session${activeThread ? ` (${activeThread})` : ""}.`
+        : "Returned to the natural-language console.",
+    ].filter(Boolean).join("\n");
+  }
+  return [
+    "已取消当前接管选择/等待。",
+    pendingCount ? "这次等待接管期间暂存的消息不会发送。" : "",
+    handoff?.active
+      ? `当前仍保持原来的接管会话${activeThread ? `（${activeThread}）` : ""}，普通消息会继续直通它。`
+      : "已回到自然语言控制台。",
+  ].filter(Boolean).join("\n");
+}
+
+export function formatTakeoverPreparationNotActive({ handoff } = {}, options = {}) {
+  const language = languageOf(options);
+  const activeThread = String(handoff?.threadId || "").slice(0, 8);
+  if (language === "en") {
+    return handoff?.active
+      ? `No takeover selection or waiting takeover is active. Current direct session remains ${activeThread || "active"}.`
+      : "No takeover selection or waiting takeover is active. Use project list to choose a session.";
+  }
+  return handoff?.active
+    ? `当前没有待取消的接管选择/等待。原接管会话仍保持${activeThread ? `（${activeThread}）` : ""}。`
+    : "当前没有待取消的接管选择/等待。可以发送“项目列表”重新选择会话。";
+}
+
+export function formatTakeoverTimedOut({ takeover, handoff } = {}, options = {}) {
+  const language = languageOf(options);
+  const targetThread = String(takeover?.target?.threadId || "").slice(0, 8) || "unknown";
+  const activeThread = String(handoff?.threadId || "").slice(0, 8);
+  const pendingCount = takeover?.pendingInputs?.length || 0;
+  if (language === "en") {
+    return [
+      `Takeover timed out while waiting for target session ${targetThread} to become idle.`,
+      "This takeover attempt was cancelled.",
+      pendingCount ? "Held messages from this waiting takeover were discarded." : "",
+      handoff?.active
+        ? `You are back in direct task mode for the previous Codex session${activeThread ? ` (${activeThread})` : ""}.`
+        : "You are back at the natural-language console.",
+      "Use project list to choose a session again.",
+    ].filter(Boolean).join("\n");
+  }
+  return [
+    `接管等待已超时，目标会话 ${targetThread} 仍未空闲。`,
+    "这次接管准备已取消。",
+    pendingCount ? "等待期间暂存的消息不会发送。" : "",
+    handoff?.active
+      ? `已回到原来的接管会话${activeThread ? `（${activeThread}）` : ""}，普通消息会继续直通它。`
+      : "已回到自然语言控制台。",
+    "可以重新发送“项目列表”选择会话。",
   ].filter(Boolean).join("\n");
 }
 
@@ -652,44 +786,89 @@ export function formatTakeoverPending(target, options = {}) {
   if (languageOf(options) === "en") {
     return [
       `Takeover is waiting for target thread ${String(target?.threadId || "").slice(0, 8) || "unknown"}.`,
-      "The target Codex session is still active. I will take over automatically after it becomes idle.",
-      "Messages you send now will be held and delivered after takeover activates.",
+      "The target Codex session is still active. I will stream its new progress during this waiting period.",
+      "After the target becomes idle, temporary observation stops and takeover activates automatically.",
+      "Messages sent before takeover activates are not queued. Send them again after the takeover-active notice.",
     ].join("\n");
   }
   return [
     `接管等待中，目标线程 ${String(target?.threadId || "").slice(0, 8) || "unknown"}。`,
-    "目标 Codex 会话仍显示为活跃，我会在它空闲后自动接管。",
-    "你现在发送的消息会暂存，并在接管生效后送达。",
+    "目标 Codex 会话仍在运行；等待期间会临时同步它的新进度。",
+    "目标空闲后会自动停止临时观察，并切换为正式接管。",
+    "接管生效前发送的消息不会排队或暂存；请等接管生效提示出现后再发送。",
   ].join("\n");
 }
 
 export function formatTakeoverActive(target, options = {}) {
+  const recap = formatTakeoverRecap(options.recap, options);
   if (languageOf(options) === "en") {
     return [
       `Takeover is active for target thread ${String(target?.threadId || "").slice(0, 8) || "unknown"}.`,
       "Now send normal Lark messages to continue this Codex conversation.",
       "Send console to temporarily return to project/session control. Send exit handoff to end this takeover without disconnecting Lark.",
-    ].join("\n");
+      recap,
+    ].filter(Boolean).join("\n");
   }
   return [
     `接管已生效，目标线程 ${String(target?.threadId || "").slice(0, 8) || "unknown"}。`,
     "现在直接发送普通飞书消息，就会继续这个 Codex 对话。",
     "发送“控制台”可临时回到项目/会话控制台；发送“退出接管”会结束当前接管，但不会断开飞书连接。",
-  ].join("\n");
+    recap,
+  ].filter(Boolean).join("\n");
 }
 
-export function formatPendingTakeoverInputQueued(state, options = {}) {
-  if (languageOf(options) === "en") {
+export function formatTakeoverRecap(recap, options = {}) {
+  const language = languageOf(options);
+  const finalMessage = clipRecapText(recap?.finalMessage || "");
+  const progressSummary = clipRecapText(recap?.progressSummary || "", 800);
+  if (!finalMessage && !progressSummary) return "";
+  if (language === "en") {
     return [
-      "This message is held.",
-      "The target Codex session is still active. After takeover activates, I will deliver this as the first input.",
-      state?.pendingInputs?.length ? `Held messages: ${state.pendingInputs.length}` : "",
+      "",
+      "**Previous task recap**",
+      "The selected session is idle. This is the last useful context from that Codex session:",
+      finalMessage ? `Last Codex reply:\n${finalMessage}` : "",
+      !finalMessage && progressSummary ? `Recent progress:\n${progressSummary}` : "",
     ].filter(Boolean).join("\n");
   }
   return [
-    "已暂存这条消息。",
-    "目标 Codex 会话仍显示为活跃；接管生效后，我会把暂存消息作为第一条输入送达。",
-    state?.pendingInputs?.length ? `待发送消息: ${state.pendingInputs.length}` : "",
+    "",
+    "**上个任务同步**",
+    "目标会话当前空闲，这是该 Codex 会话最近一轮的关键信息：",
+    finalMessage ? `上一轮回复：\n${finalMessage}` : "",
+    !finalMessage && progressSummary ? `最近进度：\n${progressSummary}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+export function formatPendingTakeoverInputDiscarded(_state, options = {}) {
+  if (languageOf(options) === "en") {
+    return [
+      "The selected Codex session is still busy, so this Lark message was not sent or queued.",
+      "Wait for the takeover-active notice, then send the message again.",
+    ].join("\n");
+  }
+  return [
+    "目标 Codex 会话仍在运行，这条飞书消息没有发送，也不会暂存。",
+    "请等接管生效提示出现后，再重新发送这条消息。",
+  ].join("\n");
+}
+
+export function formatHandoffSessionBusy(target = {}, status = {}, options = {}) {
+  const thread = String(target.threadId || target.codexSessionId || "").slice(0, 8) || "unknown";
+  const reason = status.reason || "";
+  if (languageOf(options) === "en") {
+    return [
+      "The selected Codex session is currently busy in Codex Desktop, so this Lark message was not sent or queued.",
+      `Thread: ${thread}`,
+      reason ? `Reason: ${reason}` : "",
+      "Wait until the desktop turn finishes, then send the message again. You can also return to the console and choose another session.",
+    ].filter(Boolean).join("\n");
+  }
+  return [
+    "目标 Codex 会话正在 Codex Desktop 中执行，这条飞书消息没有发送，也不会排队。",
+    `线程: ${thread}`,
+    reason ? `原因: ${reason}` : "",
+    "请等桌面端这一轮完成后再重新发送；也可以回到控制台选择其他会话。",
   ].filter(Boolean).join("\n");
 }
 
@@ -903,6 +1082,46 @@ function formatLarkTransport({ transport, larkWs }) {
   if (larkWs.connected) return "websocket connected";
   if (larkWs.starting) return "websocket connecting";
   return `websocket ${larkWs.message || "not connected"}`;
+}
+
+function bridgeMode(status = {}, language = "zh") {
+  const takeover = status.takeover || null;
+  if (takeover?.state === "pending") return language === "en" ? "waiting for takeover" : "接管等待中";
+  if (takeover?.state === "active") return language === "en" ? "takeover active" : "已接管";
+  if (takeover?.state === "selected") return language === "en" ? "session selected" : "已选择会话";
+  if (takeover?.state === "selecting" || takeover?.state === "selecting_project") return language === "en" ? "choosing project/session" : "选择项目/会话中";
+  if (status.observation?.active) return language === "en" ? "observing" : "观察中";
+  if (status.handoff?.active) return language === "en" ? "handoff active" : "会话直通";
+  return language === "en" ? "console" : "控制台";
+}
+
+function bridgeMessageRoute(status = {}, language = "zh") {
+  const takeover = status.takeover || null;
+  if (takeover?.state === "pending") {
+    return language === "en"
+      ? "not sent until the selected Codex session becomes idle"
+      : "等待目标会话空闲；当前不会发送或暂存";
+  }
+  if (takeover?.state === "active" || status.handoff?.active) {
+    return language === "en"
+      ? "sent directly to the selected Codex session"
+      : "直通目标 Codex 会话";
+  }
+  return language === "en"
+    ? "interpreted by the natural-language console"
+    : "交给自然语言控制台理解";
+}
+
+function clipRecapText(value, max = 1200) {
+  const text = String(value || "")
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .split("\n")
+    .slice(0, 24)
+    .join("\n")
+    .trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(0, max - 3)).trim()}...`;
 }
 
 function formatHandoffState(handoff) {

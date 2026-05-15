@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import { ensureDir, nowIso, observationFilePath, resolveDataDir } from "./config.mjs";
 import { findCodexThreadById, listCodexThreads } from "./handoff.mjs";
 import { createSessionProgressWatcher } from "./runner.mjs";
+import { readTakeover } from "./takeover.mjs";
 
 export async function readObservation(options = {}) {
   const dataDir = resolveDataDir(options.dataDir);
@@ -80,6 +81,8 @@ export class CodexSessionObserver {
     this.logger = logger;
     this.watcher = null;
     this.state = null;
+    this.temporaryWatcher = null;
+    this.temporaryState = null;
   }
 
   status() {
@@ -89,6 +92,8 @@ export class CodexSessionObserver {
       name: this.state?.name || "",
       cwd: this.state?.cwd || "",
       lastError: this.state?.lastError || "",
+      temporaryActive: Boolean(this.temporaryState?.active),
+      temporaryThreadId: this.temporaryState?.threadId || "",
     };
   }
 
@@ -98,7 +103,7 @@ export class CodexSessionObserver {
   }
 
   async start(state) {
-    await this.stop();
+    await this.#stopPersistent();
     this.state = state;
     if (!state?.threadPath || !state?.messageId || !this.notifier) return this.status();
     this.watcher = createSessionProgressWatcher({
@@ -109,7 +114,44 @@ export class CodexSessionObserver {
     return this.status();
   }
 
+  async startTemporary(state) {
+    if (this.state?.active && this.state.threadId === state?.threadId) return this.status();
+    await this.stopTemporary();
+    this.temporaryState = {
+      ...state,
+      active: true,
+      mode: state?.mode || "takeover_pending_observe",
+    };
+    if (!state?.threadPath || !state?.messageId || !this.notifier) return this.status();
+    this.temporaryWatcher = createSessionProgressWatcher({
+      sessionPath: state.threadPath,
+      onEvent: async (_event, summary) => this.#notifyTemporary(summary),
+    });
+    await this.temporaryWatcher.start();
+    return this.status();
+  }
+
+  async stopTemporary(match = {}) {
+    if (match.threadId && this.temporaryState?.threadId && match.threadId !== this.temporaryState.threadId) {
+      return this.status();
+    }
+    if (this.temporaryWatcher) {
+      const watcher = this.temporaryWatcher;
+      this.temporaryWatcher = null;
+      this.temporaryState = null;
+      await watcher.stop().catch((error) => this.logger.warn?.(error));
+    } else {
+      this.temporaryState = null;
+    }
+    return this.status();
+  }
+
   async stop() {
+    await this.#stopPersistent();
+    await this.stopTemporary();
+  }
+
+  async #stopPersistent() {
     if (this.watcher) {
       const watcher = this.watcher;
       this.watcher = null;
@@ -128,6 +170,17 @@ export class CodexSessionObserver {
       await this.notifier.reply(this.state.messageId, withObservationTitle(summary, this.state));
     } catch (error) {
       this.logger.warn?.(`Codex Lark Remote observer notify failed: ${error.message}`);
+    }
+  }
+
+  async #notifyTemporary(summary) {
+    if (!summary || !this.temporaryState?.active) return;
+    const takeover = await readTakeover({ dataDir: this.config.dataDir });
+    if (takeover?.state !== "pending" || takeover.target?.threadId !== this.temporaryState.threadId) return;
+    try {
+      await this.notifier.reply(this.temporaryState.messageId, withObservationTitle(summary, this.temporaryState));
+    } catch (error) {
+      this.logger.warn?.(`Codex Lark Remote temporary observer notify failed: ${error.message}`);
     }
   }
 }

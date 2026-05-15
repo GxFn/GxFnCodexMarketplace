@@ -20,6 +20,7 @@ import { LarkNotifier } from "./notifier.mjs";
 import {
   buildConsoleModeCard,
   buildBridgeStopConfirmCard,
+  buildBridgeStatusCard,
   buildHandoffDisabledCard,
   buildSetupVerificationCard,
   buildTakeoverConfirmCard,
@@ -33,33 +34,38 @@ import {
   formatConsoleModeIntro,
   formatGuidanceQueued,
   formatHelp,
+  formatHandoffModeEnabled,
+  formatHandoffModeUnavailable,
   formatHandoffDisabled,
+  formatHandoffSessionBusy,
   formatObservationList,
   formatObservationStatus,
-  formatPendingTakeoverInputQueued,
+  formatPendingTakeoverInputDiscarded,
   formatQueued,
   formatSetupVerification,
   formatTask,
   formatTakeoverActive,
+  formatTakeoverPreparationCancelled,
+  formatTakeoverPreparationNotActive,
   formatTakeoverList,
   formatTakeoverPending,
   formatTakeoverProjectList,
   formatTakeoverSelected,
   formatTakeoverStatus,
+  formatTakeoverTimedOut,
   formatWhoami,
 } from "./presenter.mjs";
 import { RemoteCommandQueue } from "./queue.mjs";
-import { CodexCliRunner } from "./runner.mjs";
+import { CodexCliRunner, readSessionLastTurnSummary } from "./runner.mjs";
 import { activateObservation, clearObservation, CodexSessionObserver, listObservationTargets, readObservation } from "./observer.mjs";
 import { assertLarkAppCredentials } from "./setup-guide.mjs";
 import { buildLarkSetupVerificationReport } from "./setup-verification.mjs";
 import { sendStartupIntroIfNeeded } from "./startup-notice.mjs";
 import {
   activatePendingTakeoverIfIdle,
-  appendPendingTakeoverInput,
-  buildPendingTakeoverPrompt,
   clearPendingTakeoverInputs,
   clearTakeover,
+  detectSessionStatus,
   executeTakeoverTarget,
   prepareTakeoverScope,
   readTakeover,
@@ -248,7 +254,8 @@ async function route(ctx) {
 
   if (req.method === "DELETE" && url.pathname === "/bridge/handoff") {
     const data = await clearHandoff({ dataDir: ctx.config.dataDir });
-    await clearTakeover({ dataDir: ctx.config.dataDir });
+    const cleared = await clearTakeover({ dataDir: ctx.config.dataDir });
+    await stopPendingTakeoverObservation(ctx, cleared?.previous);
     const keepAwake = ctx.keepAwake?.stop();
     return sendJson(res, 200, { success: true, data, keepAwake });
   }
@@ -315,24 +322,18 @@ async function route(ctx) {
   }
 
   if (req.method === "POST" && url.pathname === "/bridge/takeover/input") {
-    const { body } = await readJson(req);
-    const data = await appendPendingTakeoverInput({
-      dataDir: ctx.config.dataDir,
-      text: body.text || "",
-      messageId: body.messageId || "",
-      chatIdHash: body.chatIdHash || "",
-      userIdHash: body.userIdHash || "",
-      maxPendingInputs: ctx.config.takeover?.maxPendingInputs,
-    });
-    return sendJson(res, data?.overflow ? 409 : 200, {
-      success: !data?.overflow,
+    await readJson(req);
+    const data = await readTakeover({ dataDir: ctx.config.dataDir });
+    return sendJson(res, 409, {
+      success: false,
       data,
-      text: data?.overflow ? "Too many pending takeover messages." : formatPendingTakeoverInputQueued(data),
+      text: formatPendingTakeoverInputDiscarded(data),
     });
   }
 
   if (req.method === "DELETE" && url.pathname === "/bridge/takeover") {
     const data = await clearTakeover({ dataDir: ctx.config.dataDir });
+    await stopPendingTakeoverObservation(ctx, data?.previous);
     return sendJson(res, 200, { success: true, data, text: formatTakeoverStatus(null) });
   }
 
@@ -526,8 +527,9 @@ async function handleChatAction(ctx, event, action) {
     return replyCardOrText(ctx, event.messageId, buildConsoleModeCard({ language }), formatConsoleModeIntro({ language }));
   }
   if (action.kind === "intent_handoff_mode") {
+    if (!handoff?.active) return ctx.notifier.reply(event.messageId, formatHandoffModeUnavailable({ language }));
     await setIntentSessionModeForEvent(ctx, event, "handoff", "lark");
-    return ctx.notifier.reply(event.messageId, "已回到任务直通模式。普通消息会直接发送给当前接管的 Codex 会话。");
+    return ctx.notifier.reply(event.messageId, formatHandoffModeEnabled(handoff, { language }));
   }
   if (action.kind === "bridge_stop_confirm") {
     return replyCardOrText(ctx, event.messageId, buildBridgeStopConfirmCard({ language }), formatBridgeStopConfirm({ language }));
@@ -555,20 +557,18 @@ async function handleChatAction(ctx, event, action) {
   }
   if (action.kind === "status") {
     const counts = await ctx.queue.counts();
-    return ctx.notifier.reply(
-      event.messageId,
-      formatBridgeStatus({
-        config: ctx.config,
-        counts,
-        workerBusy: ctx.runner.busy,
-        handoff,
-        observation: await readObservation({ dataDir: ctx.config.dataDir }),
-        takeover: await readTakeover({ dataDir: ctx.config.dataDir }),
-        keepAwake: ctx.keepAwake?.status(),
-        larkWs: ctx.larkWs?.status(),
-        url: publicUrl(ctx.config),
-      }),
-    );
+    const status = {
+      config: ctx.config,
+      counts,
+      workerBusy: ctx.runner.busy,
+      handoff,
+      observation: await readObservation({ dataDir: ctx.config.dataDir }),
+      takeover: await readTakeover({ dataDir: ctx.config.dataDir }),
+      keepAwake: ctx.keepAwake?.status(),
+      larkWs: ctx.larkWs?.status(),
+      url: publicUrl(ctx.config),
+    };
+    return replyCardOrText(ctx, event.messageId, buildBridgeStatusCard(status, { language }), formatBridgeStatus(status));
   }
   if (action.kind === "handoff_status") {
     return ctx.notifier.reply(event.messageId, formatHandoffStatus(handoff));
@@ -601,8 +601,7 @@ async function handleChatAction(ctx, event, action) {
     return ctx.notifier.reply(event.messageId, formatTakeoverStatus(await readTakeover({ dataDir: ctx.config.dataDir })));
   }
   if (action.kind === "takeover_disable") {
-    await clearTakeover({ dataDir: ctx.config.dataDir });
-    return ctx.notifier.reply(event.messageId, formatTakeoverStatus(null));
+    return handleTakeoverDisable(ctx, event, { handoff, language });
   }
   if (action.kind === "observe_list") {
     const targets = await listObservationTargets({ cwd: handoff?.cwd || "", limit: 10 });
@@ -635,13 +634,7 @@ async function handleChatAction(ctx, event, action) {
     return ctx.notifier.reply(event.messageId, formatObservationStatus(observation, { language }));
   }
   if (action.kind === "handoff_disable") {
-    const activeHandoff = handoff;
-    const handoffState = await clearHandoff({ dataDir: ctx.config.dataDir });
-    await clearTakeover({ dataDir: ctx.config.dataDir });
-    await setIntentSessionModeForEvent(ctx, event, "console", "handoff_disabled");
-    await cancelHandoffTasks(ctx, activeHandoff?.threadId || handoffState?.previous?.threadId);
-    ctx.keepAwake?.stop();
-    return replyCardOrText(ctx, event.messageId, buildHandoffDisabledCard({ language }), formatHandoffDisabled({ language }));
+    return handleHandoffDisable(ctx, event, { handoff, language });
   }
   if (action.kind === "task_status" || action.kind === "task_diff") {
     return ctx.notifier.reply(event.messageId, formatTask(await ctx.queue.get(action.id)));
@@ -672,20 +665,13 @@ async function handleChatAction(ctx, event, action) {
 
   const takeover = await readTakeover({ dataDir: ctx.config.dataDir });
   if (takeover?.state === "pending") {
-    const queued = await appendPendingTakeoverInput({
-      dataDir: ctx.config.dataDir,
-      text: event.text,
-      messageId: event.messageId,
-      chatIdHash: event.chatIdHash,
-      userIdHash: event.userIdHash,
-      maxPendingInputs: ctx.config.takeover?.maxPendingInputs,
-    });
-    return ctx.notifier.reply(
-      event.messageId,
-      queued?.overflow
-        ? (language === "en" ? "Too many held takeover messages. Wait for takeover to activate before sending more." : "暂存消息太多了，请等待接管生效后再发送。")
-        : formatPendingTakeoverInputQueued(queued, { language }),
-    );
+    return ctx.notifier.reply(event.messageId, formatPendingTakeoverInputDiscarded(takeover, { language }));
+  }
+
+  const runningHandoffCommand = handoff ? await findRunningHandoffTask(ctx, handoff) : null;
+  if (handoff && !runningHandoffCommand) {
+    const busy = await detectBusyHandoffSession(ctx, handoff);
+    if (busy) return ctx.notifier.reply(event.messageId, formatHandoffSessionBusy(handoff, busy, { language }));
   }
 
   const created = handoff
@@ -696,7 +682,7 @@ async function handleChatAction(ctx, event, action) {
         chatIdHash: event.chatIdHash,
         userIdHash: event.userIdHash,
         userName: event.senderName,
-        runningCommand: await findRunningHandoffTask(ctx, handoff),
+        runningCommand: runningHandoffCommand,
       })
     : await enqueueTask(ctx, {
         repoKey: action.repoKey,
@@ -983,8 +969,7 @@ async function handleCardAction(ctx, event) {
       return handleTakeoverExecute(ctx, event, { kind: "takeover_execute", ...payload });
     }
     if (action === "takeover_cancel") {
-      await clearTakeover({ dataDir: ctx.config.dataDir });
-      return replyMaybe(ctx, event.messageId, formatTakeoverStatus(null));
+      return handleTakeoverDisable(ctx, event, { language });
     }
     return replyMaybe(ctx, event.messageId, "Unknown takeover action.");
   } catch (error) {
@@ -1083,6 +1068,34 @@ async function cancelInactiveHandoffTasks(ctx) {
   return cancelled;
 }
 
+async function handleHandoffDisable(ctx, event, { handoff, language } = {}) {
+  const activeHandoff = handoff || await readHandoff({ dataDir: ctx.config.dataDir });
+  const handoffState = await clearHandoff({ dataDir: ctx.config.dataDir });
+  const cleared = await clearTakeover({ dataDir: ctx.config.dataDir });
+  await stopPendingTakeoverObservation(ctx, cleared?.previous);
+  await setIntentSessionModeForEvent(ctx, event, "console", "handoff_disabled");
+  await cancelHandoffTasks(ctx, activeHandoff?.threadId || handoffState?.previous?.threadId);
+  ctx.keepAwake?.stop();
+  return replyCardOrText(ctx, event.messageId, buildHandoffDisabledCard({ language }), formatHandoffDisabled({ language }));
+}
+
+async function handleTakeoverDisable(ctx, event, { handoff, language } = {}) {
+  const takeover = await readTakeover({ dataDir: ctx.config.dataDir });
+  if (takeover?.state === "active") {
+    return handleHandoffDisable(ctx, event, { handoff, language });
+  }
+  if (!["selecting_project", "selecting", "selected", "pending"].includes(takeover?.state || "")) {
+    return ctx.notifier.reply(event.messageId, formatTakeoverPreparationNotActive({ handoff }, { language }));
+  }
+  const cleared = await clearTakeover({ dataDir: ctx.config.dataDir });
+  await stopPendingTakeoverObservation(ctx, cleared?.previous);
+  await setIntentSessionModeForEvent(ctx, event, handoff?.active ? "handoff" : "console", "takeover_cancelled");
+  return ctx.notifier.reply(
+    event.messageId,
+    formatTakeoverPreparationCancelled({ takeover: cleared?.previous || takeover, handoff }, { language }),
+  );
+}
+
 async function withTakeoverSelectionContext(ctx, event, action) {
   const text = String(event.text || "").trim();
   const takeover = await readTakeover({ dataDir: ctx.config.dataDir });
@@ -1120,8 +1133,12 @@ async function executeTakeoverForBridge(ctx, input = {}) {
     activatedBy: input.activatedBy || "lark",
   });
   if (!executed.pending) {
+    await stopPendingTakeoverObservation(ctx, executed.state);
     ctx.keepAwake?.start();
-    await enqueuePendingTakeoverInputs(ctx, executed);
+    executed.recap = await readTakeoverActivationRecap(ctx, executed);
+    await discardPendingTakeoverInputs(ctx, executed);
+  } else {
+    await startPendingTakeoverObservation(ctx, executed);
   }
   return executed;
 }
@@ -1136,22 +1153,26 @@ async function processPendingTakeover(ctx) {
       pendingTimeoutMs: ctx.config.takeover?.pendingTimeoutMs,
     });
     if (result?.timedOut) {
+      await stopPendingTakeoverObservation(ctx, result.state);
       const messageId = result.state?.lark?.messageId || result.state?.pendingInputs?.at?.(-1)?.messageId || "";
-      await replyMaybe(ctx, messageId, "接管等待已超时，目标 Codex 会话仍未空闲。请重新发送 windows 选择会话。");
+      const handoff = await readHandoff({ dataDir: ctx.config.dataDir });
+      const event = { chatIdHash: result.state?.lark?.chatIdHash || "" };
+      const language = await languageForEvent(ctx, event);
+      await setIntentSessionModeForEvent(ctx, event, handoff?.active ? "handoff" : "console", "takeover_timeout");
+      await replyMaybe(ctx, messageId, formatTakeoverTimedOut({ takeover: result.state, handoff }, { language }));
       return;
     }
     if (!result?.activated || result.pending) return;
+    await stopPendingTakeoverObservation(ctx, result.state);
     ctx.keepAwake?.start();
-    const queued = await enqueuePendingTakeoverInputs(ctx, result);
+    const recap = await readTakeoverActivationRecap(ctx, result);
+    await discardPendingTakeoverInputs(ctx, result);
     const messageId = result.state?.lark?.messageId || result.state?.pendingInputs?.at?.(-1)?.messageId || "";
     const language = await languageForEvent(ctx, { chatIdHash: result.state?.lark?.chatIdHash || "" });
     await replyMaybe(
       ctx,
       messageId,
-      [
-        formatTakeoverActive(result.target, { language }),
-        queued ? (language === "en" ? "Held messages were delivered as the first takeover turn." : "暂存消息已作为接管后的第一轮输入送达。") : "",
-      ].filter(Boolean).join("\n"),
+      formatTakeoverActive(result.target, { language, recap }),
     );
     Promise.resolve(ctx.runner?.processAll?.()).catch(() => {});
   } finally {
@@ -1159,31 +1180,55 @@ async function processPendingTakeover(ctx) {
   }
 }
 
-async function enqueuePendingTakeoverInputs(ctx, result) {
-  const inputs = result.state?.pendingInputs || [];
-  const prompt = buildPendingTakeoverPrompt(inputs);
-  if (!prompt) {
-    if (inputs.length) await clearPendingTakeoverInputs({ dataDir: ctx.config.dataDir });
-    return null;
-  }
-  const messageId = inputs.at(-1)?.messageId || result.state?.lark?.messageId || "";
-  const created = await enqueueHandoffTask(ctx, {
-    handoff: result.handoff,
-    text: prompt,
-    messageId,
-    chatIdHash: result.state?.lark?.chatIdHash || "",
-    userIdHash: result.state?.lark?.userIdHash || "",
-    userName: "lark_user",
-    runningCommand: null,
+async function startPendingTakeoverObservation(ctx, result) {
+  const state = result?.state || {};
+  const target = result?.target || state.target || {};
+  if (!ctx.observer?.startTemporary || state.state !== "pending" || !target.threadPath) return;
+  await ctx.observer.startTemporary({
+    active: true,
+    mode: "takeover_pending_observe",
+    threadId: target.threadId || "",
+    threadPath: target.threadPath || "",
+    cwd: target.cwd || "",
+    name: target.name || "",
+    messageId: state.lark?.messageId || "",
+    chatIdHash: state.lark?.chatIdHash || "",
+    userIdHash: state.lark?.userIdHash || "",
+    activatedAt: state.pendingAt || nowIso(),
+    activatedBy: "takeover-pending",
   });
-  await clearPendingTakeoverInputs({ dataDir: ctx.config.dataDir });
-  Promise.resolve(ctx.runner?.processAll?.()).catch(() => {});
-  return created;
+}
+
+async function stopPendingTakeoverObservation(ctx, state = {}) {
+  if (!ctx.observer?.stopTemporary) return;
+  await ctx.observer.stopTemporary({ threadId: state?.target?.threadId || state?.previousThreadId || "" });
+}
+
+async function discardPendingTakeoverInputs(ctx, result) {
+  const inputs = result.state?.pendingInputs || [];
+  if (!inputs.length) return null;
+  return clearPendingTakeoverInputs({ dataDir: ctx.config.dataDir });
 }
 
 function formatTakeoverExecution(executed, options = {}) {
   if (executed?.pending) return formatTakeoverPending(executed.target, options);
-  return formatTakeoverActive(executed?.target, options);
+  return formatTakeoverActive(executed?.target, { ...options, recap: executed?.recap });
+}
+
+async function readTakeoverActivationRecap(ctx, result) {
+  const sessionPath = result?.target?.threadPath || result?.handoff?.threadPath || "";
+  if (!sessionPath) return null;
+  return readSessionLastTurnSummary(sessionPath, {
+    showCommands: ctx.config.handoff?.showCommands === true,
+  });
+}
+
+async function detectBusyHandoffSession(ctx, handoff) {
+  if (!handoff?.threadPath) return null;
+  const status = await detectSessionStatus(handoff.threadPath, {
+    idleDebounceMs: ctx.config.handoff?.idleDebounceMs ?? ctx.config.takeover?.idleDebounceMs,
+  });
+  return status.status === "running" ? status : null;
 }
 
 async function buildSetupVerificationFromBridge(ctx) {

@@ -281,30 +281,6 @@ export async function executeTakeoverTarget(options = {}) {
   return { state: active, target: updatedTarget, handoff, pending: false };
 }
 
-export async function appendPendingTakeoverInput(options = {}) {
-  const dataDir = resolveDataDir(options.dataDir);
-  const state = await readTakeover({ dataDir });
-  if (!state || state.state !== "pending") return null;
-  const max = Number(options.maxPendingInputs || 20);
-  const pendingInputs = Array.isArray(state.pendingInputs) ? state.pendingInputs.slice() : [];
-  if (pendingInputs.length >= max) {
-    return { ...state, overflow: true };
-  }
-  pendingInputs.push({
-    messageId: options.messageId || "",
-    text: options.text || "",
-    createdAt: nowIso(),
-  });
-  const updated = {
-    ...state,
-    pendingInputs,
-    lark: mergeLarkState(state.lark, options),
-    lastSeenAt: nowIso(),
-  };
-  await writeTakeover({ dataDir }, updated);
-  return updated;
-}
-
 export async function activatePendingTakeoverIfIdle(options = {}) {
   const dataDir = resolveDataDir(options.dataDir);
   const state = await readTakeover({ dataDir });
@@ -353,18 +329,6 @@ export async function clearPendingTakeoverInputs(options = {}) {
   };
   await writeTakeover({ dataDir }, updated);
   return updated;
-}
-
-export function buildPendingTakeoverPrompt(inputs = []) {
-  const items = inputs
-    .map((item, index) => `${index + 1}. ${String(item.text || "").trim()}`)
-    .filter((line) => !/^\d+\.\s*$/.test(line));
-  if (!items.length) return "";
-  return [
-    "[Messages received while takeover was waiting for the current Codex turn to finish]",
-    "",
-    ...items,
-  ].join("\n");
 }
 
 export async function detectSessionStatus(sessionPath, options = {}) {
